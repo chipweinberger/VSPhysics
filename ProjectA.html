@@ -1,0 +1,261 @@
+<body>
+<canvas id="glcanvas" width="1024" height="768">
+</canvas>
+
+<script src="/lib/webgl-utils.js"></script>
+<script src="/lib/webgl-debug.js"></script>
+<script src="/lib/cuon-utils.js"></script>
+<script src="/lib/cuon-matrix-quat.js"></script> 
+
+# in the future as code develops move to seperate files
+#<script type="text/javascript" src="somefile.js"></script>
+
+
+<script id="fragmentShader" type="x-shader/x-fragment">
+precision mediump float;
+
+varying vec4 vColor;
+
+void main(void) {
+	gl_FragColor = vColor;
+}
+</script>
+
+<script id="VertexShader" type="x-shader/x-vertex">
+attribute vec3 aVertexPosition;
+attribute vec4 aVertexColor;
+
+uniform mat4 uMVMatrix;
+uniform mat4 uPMatrix;
+
+varying vec4 vColor;
+
+void main(void) {
+	gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
+	vColor = aVertexColor;
+}
+</script>
+
+
+#for now just include it here
+<script type="text/javascript">
+
+#globals
+var gl //gl context
+var canvas //canvas element
+var particleBuffer //array-buffer of particles
+var numParticles = 30
+
+var particle_vars = function(){
+	this.PART_XPOS     = 0;  //  position    
+	this.PART_YPOS     = 1;
+	this.PART_ZPOS     = 2;
+	this.PART_XVEL     = 3; //  velocity    
+	this.PART_YVEL     = 4;
+	this.PART_ZVEL     = 5;
+	this.PART_X_FTOT   = 6;  // force accumulator:'ApplyForces()' fcn clears
+	this.PART_Y_FTOT   = 7;  // to zero, then adds each force to each particle.
+	this.PART_Z_FTOT   = 8;        
+	this.PART_R        = 9;  // color : red,green,blue
+	this.PART_G        =10;  
+	this.PART_B        =11;
+	this.PART_MASS     =12;  // mass   
+	this.PART_DIAM 	=13;	// on-screen diameter (in pixels)
+	this.PART_RENDMODE =14;	// on-screen appearance (square, round, or soft-round)
+	this.PART_AGE      =15;  // # of frame-times since creation/initialization
+	this.PART_CHARGE   =16;  // for electrostatic repulsion/attraction
+	this.PART_MASS_VEL =17;  // time-rate-of-change of mass.
+	this.PART_MASS_FTOT=18;  // force-accumulator for mass-change
+	
+	this.PARTICLE_STRIDE   =19;  // Size of array in CPart uses to store its values.
+}
+
+var camera_vars = function(){
+	this.posX = 0
+	this.posY = 0
+	this.posZ = 0s
+	this.rotX = 0
+	this.rotY = 0
+	this.rotZ = 0
+	this.fov  = 70
+	
+	this.projectionMatrix = function(){
+		
+	}
+
+}
+
+var utils = function(){
+	
+	this.getShader(gl, elementId) = function {
+		var shaderScript, theSource, currentChild, shader;
+
+		var shaderScript = document.getElementById(elementId);
+		var theSource = "";
+		var currentChild = shaderScript.firstChild;
+
+		while(currentChild) {
+			if (currentChild.nodeType == currentChild.TEXT_NODE) {
+				theSource += currentChild.textContent;
+			}
+			currentChild = currentChild.nextSibling;
+		}
+		
+		if (shaderScript.type == "x-shader/x-fragment") {
+			shader = gl.createShader(gl.FRAGMENT_SHADER);
+		} else if (shaderScript.type == "x-shader/x-vertex") {
+			shader = gl.createShader(gl.VERTEX_SHADER);
+		} else {
+			return null;
+		}
+
+		gl.shaderSource(shader, theSource);
+		gl.compileShader(shader);  
+		
+		if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {  
+			alert("An error occurred compiling the shaders: " + gl.getShaderInfoLog(shader));  
+			return null;  
+		}
+		
+		return shader;
+	}
+}
+
+
+
+
+function init(){
+	//gl setup
+	gl = WebGLUtils.setupWebGL(canvas);
+	canvas = document.getElementById("glcanvas");
+	gl.clearColor(0.0, 0.0, 0.0, 1.0);                     
+	gl.enable(gl.DEPTH_TEST);                              
+	gl.depthFunc(gl.LEQUAL);                               
+	gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+	
+	//buffer
+	particles_buffer = new Float32Array(numParticles * particle_vars.PARTICLE_STRIDE);
+	
+	//shaders and pipeline
+	var fragmentShader = getShader(gl, "fragmentShader");
+	var vertexShader = getShader(gl, "vertexShader");
+
+	// Create the shader program
+
+	shaderProgram = gl.createProgram();
+	gl.attachShader(shaderProgram, vertexShader);
+	gl.attachShader(shaderProgram, fragmentShader);
+	gl.linkProgram(shaderProgram);
+
+	// If creating the shader program failed, alert
+
+	if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+		alert("Unable to initialize the shader program.");
+	}
+
+	gl.useProgram(shaderProgram);
+
+	vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+	gl.enableVertexAttribArray(vertexPositionAttribute);
+	
+	//start rendering
+	window.requestAnimationFrame(mainLoop);
+}
+
+function initVertexBuffers(gl) {
+
+	var vertexBufferID = gl.createBuffer();																							
+	gl.bindBuffer(gl.ARRAY_BUFFER, vertexBufferID);
+	gl.bufferData(gl.ARRAY_BUFFER,s0,gl.DYNAMIC_DRAW);
+	
+	a_PositionID = gl.getAttribLocation(gl.program, 'a_Position');
+
+	gl.vertexAttribPointer(
+	a_PositionID,	
+	3,					// size
+	gl.FLOAT,			// type
+	false,				// isNormalized 
+	PART_MAXVAR*FSIZE,  // stride
+	0);	                // Offset
+	gl.enableVertexAttribArray(a_PositionID);
+
+	// ---------------Connect 'a_Color' attribute to bound buffer:--------------
+	// Get the ID# for the vec3 a_Color variable in the graphics hardware
+	// (keep it as global var--we'll need it for PartSys_render())
+	a_ColorID = gl.getAttribLocation(gl.program, 'a_Color');
+
+	// Tell GLSL to fill 'a_Color' attribute variable for each shader 
+	// with values in the buffer object chosen by 'gl.bindBuffer()' command.
+	// Websearch yields OpenGL version: 
+	//		http://www.opengl.org/sdk/docs/man/xhtml/glVertexAttribPointer.xml
+	gl.vertexAttribPointer(
+	a_ColorID,		//index == attribute var. name used in the shader pgm.
+	3,						// size == how many dimensions for this attribute: 1,2,3 or 4?
+	gl.FLOAT,			// type == what data type did we use for those numbers?
+	false,				// isNormalized == are these fixed-point values that we need
+	//									normalize before use? true or false
+	PART_MAXVAR * FSIZE,// stride == #bytes (of other, interleaved data) between 
+	// separating OUR values?
+	PART_R * FSIZE);	// Offset -- how many bytes from START of buffer to the
+	// value we will actually use?  We start with position.
+	// Enable this assignment of the a_Position variable to the bound buffer:
+	gl.enableVertexAttribArray(a_ColorID);
+
+	// ---------------Connect 'a_diam' attribute to bound buffer:---------------
+	// Get the ID# for the scalar a_diam variable in the graphics hardware
+	// (keep it as global var--we'll need it for PartSys_render())
+	a_diamID = gl.getAttribLocation(gl.program, 'a_diam');
+	if(a_diamID < 0) {
+		console.log('Failed to get the storage location of scalar a_diam');
+		return -1;
+	}
+	// Tell GLSL to fill 'a_Position' attribute variable for each shader 
+	// with values in the buffer object chosen by 'gl.bindBuffer()' command.
+	// Websearch yields OpenGL version: 
+	//		http://www.opengl.org/sdk/docs/man/xhtml/glVertexAttribPointer.xml
+	gl.vertexAttribPointer(
+	a_diamID,			//index == attribute var. name used in the shader pgm.
+	1,						// size == how many dimensions for this attribute: 1,2,3 or 4?
+	gl.FLOAT,			// type == what data type did we use for those numbers?
+	false,				// isNormalized == are these fixed-point values that we need
+	//									to normalize before use? true or false
+	PART_MAXVAR*FSIZE,// stride == #bytes (of other, interleaved data) between 
+	// separating OUR values?
+	PART_DIAM*FSIZE); // Offset -- how many bytes from START of buffer to the
+	// value we will actually use?  We start with position.
+	// Enable this assignment of the a_Position variable to the bound buffer:
+	gl.enableVertexAttribArray(a_diamID);
+
+	// --------------DONE with connecting attributes to bound buffer:-----------
+	return partCount;
+}
+
+
+function elapsedTime(sinceTime) {										
+	return Date.now() - sinceTime;					
+}
+
+var lastTime = null;
+function mainLoop(timestamp) {
+	if (!lastTime)  = Date.now();
+	render(elapsedTime(lastTime));
+	window.requestAnimationFrame(mainLoop);
+}
+
+function render(timestep){
+
+	gl.clear(gl.COLOR_BUFFER_BIT);
+
+}
+
+function PartSys_render(gl, s) {
+	gl.bufferSubData(gl.ARRAY_BUFFER,0,s0);//enum,offset,datasource
+	gl.drawArrays(gl.POINTS, 0, numParticles);	
+}
+
+
+init()
+
+
+</script>
+</body>
