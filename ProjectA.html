@@ -43,44 +43,223 @@ void main(void) {
 #globals
 var gl //gl context
 var canvas //canvas element
-var particleBuffer //array-buffer of particles
-var numParticles = 30
 
-var particle_vars = function(){
-	this.PART_XPOS     = 0;  //  position    
-	this.PART_YPOS     = 1;
-	this.PART_ZPOS     = 2;
-	this.PART_XVEL     = 3; //  velocity    
-	this.PART_YVEL     = 4;
-	this.PART_ZVEL     = 5;
-	this.PART_X_FTOT   = 6;  // force accumulator:'ApplyForces()' fcn clears
-	this.PART_Y_FTOT   = 7;  // to zero, then adds each force to each particle.
-	this.PART_Z_FTOT   = 8;        
-	this.PART_R        = 9;  // color : red,green,blue
-	this.PART_G        =10;  
-	this.PART_B        =11;
-	this.PART_MASS     =12;  // mass   
-	this.PART_DIAM 	=13;	// on-screen diameter (in pixels)
-	this.PART_RENDMODE =14;	// on-screen appearance (square, round, or soft-round)
-	this.PART_AGE      =15;  // # of frame-times since creation/initialization
-	this.PART_CHARGE   =16;  // for electrostatic repulsion/attraction
-	this.PART_MASS_VEL =17;  // time-rate-of-change of mass.
-	this.PART_MASS_FTOT=18;  // force-accumulator for mass-change
+//an enumeration
+var particle_vars = {
+	PART_XPOS     : 0,  //  position    
+	PART_YPOS     : 1,
+	PART_ZPOS     : 2,
+	PART_XVEL     : 3, //  velocity    
+	PART_YVEL     : 4,
+	PART_ZVEL     : 5,
+	PART_X_FTOT   : 6,  // force accumulator:'ApplyForces()' fcn clears
+	PART_Y_FTOT   : 7,  // to zero, then adds each force to each particle.
+	PART_Z_FTOT   : 8,        
+	PART_R        : 9,  // color : red,green,blue
+	PART_G        :10,  
+	PART_B        :11,
+	PART_MASS     :12,  // mass   
+	PART_DIAM 	  :13,	// on-screen diameter (in pixels)
+	PART_RENDMODE :14,	// on-screen appearance (square, round, or soft-round)
+	PART_AGE      :15,  // # of frame-times since creation/initialization
+	PART_CHARGE   :16,  // for electrostatic repulsion/attraction
+	PART_MASS_VEL :17,  // time-rate-of-change of mass.
+	PART_MASS_FTOT:18,  // force-accumulator for mass-change
 	
-	this.PARTICLE_STRIDE   =19;  // Size of array in CPart uses to store its values.
+	PARTICLE_STRIDE:19,  // Size of array in CPart uses to store its values.
 }
 
+var wall_types = {
+	WTYPE_DEAD       :0,   // not in use
+	WTYPE_BOXIN		 :1,
+	WTYPE_BOXOUT     :2,
+	WTYPE_SPHERE     :3,  // solid sphere centered at particle with index e0;
+                            // no other particles allowed closer than 'radmin'
+                            // to the e0 particle.
+                            // (NOTE: e0 is a state-vector index: pS0[e0] )
+	
+	WTYPE_STICK      :4,  // Connects 2 particles with fixed-length separation
+						  // between particles whose indices are held in e0,e1
+						  // (e.g. particles at pS0[e0] and pS0[e1] )
+	WTYPE_PULLEY     :5,  // Keep constant sum-of-distances for 3 particles
+					 	   // A,B,Pivot:  ||A-Pivot||+||B-Pivot|| = dmax.
+	WTYPE_ANCHOR     :6,  // Lock one particle at location xpos,ypos,zpos
+}
+
+var affected_particle_set = {
+	ALL:0,
+	PART_INDEX1:1,
+	BOTH_1_2:2,
+}
+
+var wall_vars= {
+	TYPE:0, //one of the "wall_types" from above
+	KBOUNCY:1,//how bouncy is this wall
+	WALL_XPOS:2,
+	WALL_YPOS:3,
+	WALL_ZPOS:4,
+	SIZE:5,
+	AFFECTED_PARTICLES:6,//instance of "affected particle set"
+	PART_INDEX1:7,		 //index of particle affected by constraint
+	PART_INDEX2:8,
+	
+	WALL_STRIDE:9, //stride of a wall object
+}
+
+var force_types = {
+	F_NONE      :0,       // Non-existent force: ignore this CForcer object
+	F_MOUSE     :1,       // Spring-like connection to the mouse cursor; lets
+						// you 'grab' and 'wiggle' one particle(or several).
+	F_GRAV_E    :2,       // Earth-gravity: pulls all particles 'downward'.
+	F_GRAV_P    :3,       // Planetary-gravity; particle-pair (e0,e1) attract
+						// each other with force== grav* mass0*mass1/ dist^2
+	F_WIND      :4,       // Blowing-wind-like force-field;fcn of 3D position
+	F_BUBBLE    :5,       // Constant inward force towards centerpoint if
+						// particle is > max_radius away from centerpoint.
+	F_DRAG      :6,       // Viscous drag -- proportional to neg. velocity.
+	F_SPRING    :7,       // ties together 2 particles; distance sets force
+	F_SPRINGSET :8,       // a big collection of identical springs; lets you
+						// make cloth & rubbery shapes as one force-making
+						// object, instead of many many F_SPRING objects.
+	F_CHARGE    :9,       // attract/repel by charge and inverse distance;
+						// applies to all charged particles.
+}
+
+var force_vars = {
+    TYPE:0,//of type "force_type" from above
+	POSX:1,
+	POSY:2,
+	POSZ:3,
+	DIRX:4,
+	DIRY:5,
+	DIRZ:6,
+	STRENGTH:7,
+	REST_STRENGTH:8,// Less than this treat as strength zero
+	AFFECTED_PARTICLES:9,//type "affected particle set"
+	PART_INDEX1:10,
+	PART_INDEX2:11,
+	
+	FORCE_STRIDE:12,
+}
+
+var particle_system= function(){
+	this.numParticles
+	//buffers
+	this.ps0
+	this.ps0dot
+	this.ps1
+	this.ps1dot
+	this.psMid
+	this.psMidDot
+	//solving
+    this.sovler = null
+	this.draw = function(){
+	}
+	this.dotMaker = function(CPart *pDotDest, CPart *pSrc, CForcer *pF, CWall *pW)){
+	
+	}
+	this.applyAllForces = function(CPart *pS, CForcer *pF);
+    this.applyAllWalls = function(CPart *pS_now, CPart *pS_prev,  CWall *pWsrc);
+    this.stateVecSwap = function(CPart **ppA, CPart **ppB);
+    void stateVecSizer(int nuSize);// For each state vector, create a new array
+                                    // (dyn. allocation) of particles.  Discard
+                                    // any previous particles (if any) and if
+                                    // successful, set partCount to 'nuSize'.
+                                    // (NOTE: same size for all state-vectors).
+    void stateVecWipe(void);        // Discard all existing memory allocated for
+                                    // state vectors in this CPartSys.
+
+    void stateVecDraw(CPart *pS);   // Draw state-vector pS usingOpenGL calls.
+
+    // Math operators (BETTER: use operator overloading!)
+    void stateVecZero(CPart *pS);                   // set state to zero
+    void stateVecAssign(CPart *pDest, CPart *pSrc); // copy src to dest
+    void stateVecAplusBtimesC(CPart *pDest, CPart *pA, CPart *pB, double scl);
+                                                    // dest = A + scl*B
+
+    //-------Force-List Vector(s)----------------
+    int forcerCount;                // # of forcer-making objects held in the
+                                    // dyn. alloc'd list at pF0 (if needed, in
+                                    // pF1, pFM, pF0dot,pF1dot,pFMdot as well).
+    CForcer *pF0;                   // f0; forcer-vector-- dyn. alloc'd list of
+                                    // all CURRENT force-making objects,
+    // *pF0dot;                     //  and its time-derivative f0dot
+                                    // (==NULL if none).
+/*
+    // OPTIONAL: as needed,
+    //      create these additional forcer-vectors to implement time-dependent-
+    //      and particle-dependent (?and wall-dependent?) force-making objects.
+    //  !!CAREFUL!!! Be sure to update forcerVecSizer(), forcerVecWipe(),
+    //               CPartSys() and ~CPartSys() for the new forcer-vectors;
+    //  NOTE: all forcer-vectors are the same size (CPartSys:: forcerCount).
+    CForcer *pF1, pF1dot;           // f1; forcer-vector--dyn. alloc'd list of
+                                    // all NEXT force-making objects, and its
+                                    // time-derivative f1dot (==NULL if none)
+    CForcer *pFM, *pFMdot;          // fM, fMdot; midpoint forcer-vector and its
+                                    // time deriv. (see solver, midpoint method)
+*/
+    void forcerVecSizer(int nuSize);// Change the size of each dyn.-alloc'd list
+                                    // of force-applying objects (CForcer obj.).
+                                    // Discard any previous forcers (if any),
+                                    // and if successful, set forcerCount to
+                                    // nuSize.(same size for all forcer-vectors)
+    void forcerVecWipe(void);       // Discard all existing memory allocated
+                                    // for forcer-vectors in this CPartSys.
+    void forcerVecDraw(CForcer *pF, CPart *pS);
+                                    // Draw forcer-vector pF using OpenGL calls;
+                                    // (needs corresponding state-vector at pS
+                                    // because force-applying springs get their
+                                    // positions in space from the particles
+                                    // they connect together).
+    //-------Wall-Vectors(s)---------------
+    int wallCount;                  //# of constraint-making objects (CWall obj)
+                                    // held in the dyn. alloc'd list at pC0.
+    CWall *pC0;                     // c0; constraint-vector--dyn. alloc'd list
+                                    // of all CURRENT constraint-making objects,
+    //CWall *pC0dot;                  // and its time-derivative c0dot
+                                    // (==NULL if none).
+    // OPTIONAL: as needed,
+    //      create these additional wall-vectors to implement time-dependent-0
+    //      and particle-dependent (?and forcer-dependent?) wall-making objects.
+    // !!CAREFUL!! Be sure to update wallVecSizer(), wallVecWipe(), CPartSys()
+    //      and ~CPartSys() for the new forcer-vectors.
+    // NOTE: same size for all wall-vectors)
+    void wallVecSizer(int nuSiz);   // For each limit-vector, create (by dyn.
+                                    // allocation) an new array of constraints
+                                    // (CLimit objects). Discard any prev.
+                                    // constraints (if any), and if successful,
+                                    // set limitCount to nuSiz.
+                                    // (NOTE: same size for all limit-vectors).
+    void wallVecWipe(void);         // Discard all existing memory allocated
+                                    // for wall-vectors in this CPartSys.
+    void wallVecDraw(CWall *pC);    // Draw the wall-vector pC with OpenGL calls
+
+};
+
 var camera_vars = function(){
-	this.posX = 0
-	this.posY = 0
-	this.posZ = 0s
-	this.rotX = 0
-	this.rotY = 0
-	this.rotZ = 0
-	this.fov  = 70
+    //look down the y axis
+	this.eyeX = 0
+	this.eyeY = 0
+	this.eyeZ = 0.3
+	this.atX = 0.3
+	this.atY = 1
+	this.atZ = 0
+	this.upX = 0
+	this.upY = 0
+	this.upZ = 1
+	this.fovy  = 70
+	this.aspect  = 1
+	this.near = .01
+	this.far  = 100
 	
 	this.projectionMatrix = function(){
-		
+		return Matrix4.setPerspective(fovy, aspect, near, far)
+	}
+	this.lookAtMatrix = function(){
+		return Matrix4.setLookAt(eyeX, eyeY, eyeZ, atX, atY, atZ, upX, upY, upZ) 
+	}
+	this.viewMatrix = function(){
+		return this.projectionMatrix() * this.lookAtMatrix()
 	}
 
 }
