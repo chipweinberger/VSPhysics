@@ -58,12 +58,55 @@ var Renderer = function(){
 		this.aspect  = 1.0
 		this.near = .01
 		this.far  = 100
+		
+		this.pan = 0
+		this.tilt = 0
+		this.roll = 0
+		
+		this.transX = 0
+		this.transY = 0
+		this.transZ = 0
+		
 		this.projectionMatrix = function(){
 			return new Matrix4().setPerspective(this.fovy, this.aspect, this.near, this.far)
 		}
 		this.viewMatrix = function(){
-			return new Matrix4().setLookAt(this.eyeX, this.eyeY, this.eyeZ, this.atX, this.atY, this.atZ, this.upX, this.upY, this.upZ)
+			var vm =  new Matrix4().setLookAt(this.eyeX, this.eyeY, this.eyeZ, this.atX, this.atY, this.atZ, this.upX, this.upY, this.upZ)
+			var vmrotated = vm.rotate(this.pan,0,1,0).rotate(this.tilt,1,0,0).rotate(this.roll,0,0,1)
+			return vmrotated.translate(this.transX,this.transY,this.transZ)
 		}
+		
+		this.keyboardControl = function(ev){
+			var speed = 2
+			switch(ev.keyCode) {
+				case 39://right arrow
+					this.pan += speed;break
+				case 37://left arrow
+					this.pan -= speed;break
+				case 38://up arrow
+					this.tilt += speed;break
+				case 40://down arrow
+					this.tilt -= speed;break
+				case 65://a
+					this.transX += speed/40;break
+				case 90://z
+					this.transX -= speed/40;break
+				case 83://s           
+					this.transY += speed/40;break
+				case 88://x           
+					this.transY -= speed/40;break
+				case 68://d           
+					this.transZ += speed/40;break
+				case 67://c           
+					this.transZ -= speed/40;break
+				case 70://f
+					this.roll += speed;break
+				case 86://v
+					this.roll -= speed;break
+			}
+		
+		}
+		
 	}
 	this.cam0 = new Camera()
 	this.uViewMatrixID
@@ -114,11 +157,14 @@ var Renderer = function(){
 		if(uViewMatrixID < 0) console.log('Failed to get the gfx storage location of uViewMatrix')
 		
 		//groundplane
-		this.ground_plane = new GroundPlane(gl,"Y", 30, .2)
+		this.ground_plane = new GroundPlane(gl,"Y", 60, .2)
 		this.ground_plane.init()
 		
 		//particle system
-		//this.partSys = particle_system()
+		this.partSys = new ParticleSystem(gl)
+		
+		//keyboard control
+		window.addEventListener("keydown", this.cam0.keyboardControl.bind(this.cam0), false);
 		
 		window.requestAnimationFrame(this.draw.bind(this));
 		
@@ -131,7 +177,7 @@ var Renderer = function(){
 		gl.uniformMatrix4fv(uViewMatrixID, false, this.cam0.viewMatrix().elements)
 		
 		this.ground_plane.draw()
-		//partSys.draw()
+		this.partSys.draw()
 		
 		window.requestAnimationFrame(this.draw.bind(this));
 	}
@@ -143,8 +189,8 @@ var Renderer = function(){
 //axis == "X" "Y" or "Z" meaning x==0 y==0 or z==0
 var GroundPlane = function(glContext, axis, num_lines, spacing){
 	this.gl = glContext
-	this.lineLength = 100
-	this.vertexBuffer = new Float32Array(num_lines * 2 * 3 * 2)//2pts per line, 3 floats per point, 1 line horizontal, 1 vertical
+	this.lineLength = 13
+	this.vertexBuffer = new Float32Array(num_lines * 2 * 3 * 2 * 2)//2pts per line, 3 floats per point, 1 line horizontal, 1 vertical
 	this.vertexBufferID
 	this.init = function(){
 		this.vertexBufferID = gl.createBuffer()
@@ -153,7 +199,7 @@ var GroundPlane = function(glContext, axis, num_lines, spacing){
 		var start = -( spacing * (num_lines/2) )//the position the first line starts at
 		var end = start * -1
 		var i = 0
-		for(var pos=start; pos <= end; pos=pos+spacing){
+		for(var pos=start; pos <= (end*2); pos=pos+spacing){
 			//extend down z
 			this.vertexBuffer[i] = pos //X
 			this.vertexBuffer[i+1] = 0 //Y
@@ -188,16 +234,16 @@ var GroundPlane = function(glContext, axis, num_lines, spacing){
 		gl.vertexAttribPointer(a_PositionID,3,gl.FLOAT, false, 0,0)
 		
 		
-		gl.drawArrays(gl.LINES, 0, num_lines * 2);
+		gl.drawArrays(gl.LINES, 0, num_lines * 4);
 	}
 
 
 }
 
 //A particle system is "renderable", meaning it takes gl context as input and provides a draw function
-var ParticleSystem = function(num_particles, glContext){
+var ParticleSystem = function(glContext){
 	this.gl = glContext
-	this.numParticles = num_particles
+	this.numParticles = 1000
 	//an enumeration
 	var particle_vars = {
 		PART_XPOS     : 0,  //  position    
@@ -292,7 +338,6 @@ var ParticleSystem = function(num_particles, glContext){
 	}
 	this.buffers = {//all buffers start as null
 		ps0      : null,
-		ps0      : null,
 		ps0dot   : null,
 		ps1      : null,
 		ps1dot   : null,
@@ -306,6 +351,8 @@ var ParticleSystem = function(num_particles, glContext){
 		}
 	}
 	this.sovler = null
+	this.draw = function(){
+	}
 	/*
 	this.dotMaker = function(CPart *pDotDest, CPart *pSrc, CForcer *pF, CWall *pW)){
 		
