@@ -45,8 +45,8 @@ var canvas //canvas element
 var Renderer = function(){
 	 var Camera = function(){
 		//look down the z negative axis
-		this.eye = new Vector3([0,0.5,0])
-		this.at = new Vector3([0,0,-1])
+		this.eye = new Vector3([0,4,4])
+		this.at = new Vector3([0,3,-5])
 		this.up = new Vector3([0,1,0])
 		this.fovy  = 70
 		this.aspect  = 1.0
@@ -181,6 +181,7 @@ var Renderer = function(){
 		
 		//add gravity
 		this.partSys.addGravity()
+		this.partSys.addBoxIn(0,6,0,6)
 		
 		window.requestAnimationFrame(this.draw.bind(this));
 		
@@ -284,79 +285,79 @@ var ParticleSystem = function(glContext){
 	
 	//an enumeration
 	this.particle_vars = {
-		PART_XPOS     : 0,  //  position    
-		PART_YPOS     : 1,
-		PART_ZPOS     : 2,
-		PART_XVEL     : 3, //  velocity    
-		PART_YVEL     : 4,
-		PART_ZVEL     : 5,
-		PART_X_FTOT   : 6,  // force accumulator:'ApplyForces()' fcn clears
-		PART_Y_FTOT   : 7,  // to zero, then adds each force to each particle.
-		PART_Z_FTOT   : 8,        
-		PART_R        : 9,  // color : red,green,blue
-		PART_G        :10,  
-		PART_B        :11,
-		PART_MASS     :12,  // mass   
-		PART_DIAM 	  :13,	// on-screen diameter (in pixels)
-		PART_RENDMODE :14,	// on-screen appearance (square, round, or soft-round)
-		PART_AGE      :15,  // # of frame-times since creation/initialization
-		PART_CHARGE   :16,  // for electrostatic repulsion/attraction
-		PART_MASS_VEL :17,  // time-rate-of-change of mass.
-		PART_MASS_FTOT:18,  // force-accumulator for mass-change
+		PARTXPOS     : 0,  //  position    
+		PARTYPOS     : 1,
+		PARTZPOS     : 2,
+		PARTXVEL     : 3, //  velocity    
+		PARTYVEL     : 4,
+		PARTZVEL     : 5,
+		PARTXFTOT   : 6,  // force accumulator:'ApplyForces()' fcn clears
+		PARTYFTOT   : 7,  // to zero, then adds each force to each particle.
+		PARTZFTOT   : 8,        
+		PARTR        : 9,  // color : red,green,blue
+		PARTG        :10,  
+		PARTB        :11,
+		PARTMASS     :12,  // mass   
+		PARTDIAM 	  :13,	// on-screen diameter (in pixels)
+		PARTRENDMODE :14,	// on-screen appearance (square, round, or soft-round)
+		PARTAGE      :15,  // # of frame-times since creation/initialization
+		PARTCHARGE   :16,  // for electrostatic repulsion/attraction
+		PARTMASSVEL :17,  // time-rate-of-change of mass.
+		PARTMASSFTOT:18,  // force-accumulator for mass-change
 		
-		PARTICLE_STRIDE:19,  // Size of array in CPart uses to store its values.
+		PARTICLESTRIDE:19,  // Size of array in CPart uses to store its values.
 	}
 	this.affected_particle_set = {
 		ALL:0,
-		PART_INDEX1:1,
-		BOTH_1_2:2,
+		PARTINDEX1:1,
+		BOTH12:2,
 	}
 	this.wall_vars= {
 		wall_types: {
-			WTYPE_DEAD       :0,   // not in use
-			WTYPE_BOXIN		 :1,
-			WTYPE_BOXOUT     :2,
-			WTYPE_SPHERE     :3,  // solid sphere centered at particle with index e0;
+			WTYPEDEAD       :0,   // not in use
+			WTYPEBOXIN		 :1,
+			WTYPEBOXOUT     :2,
+			WTYPESPHERE     :3,  // solid sphere centered at particle with index e0;
 			// no other particles allowed closer than 'radmin'
 			// to the e0 particle.
 			// (NOTE: e0 is a state-vector index: pS0[e0] )
 			
-			WTYPE_STICK      :4,  // Connects 2 particles with fixed-length separation
+			WTYPESTICK      :4,  // Connects 2 particles with fixed-length separation
 			// between particles whose indices are held in e0,e1
 			// (e.g. particles at pS0[e0] and pS0[e1] )
-			WTYPE_PULLEY     :5,  // Keep constant sum-of-distances for 3 particles
+			WTYPEPULLEY     :5,  // Keep constant sum-of-distances for 3 particles
 			// A,B,Pivot:  ||A-Pivot||+||B-Pivot|| = dmax.
-			WTYPE_ANCHOR     :6,  // Lock one particle at location xpos,ypos,zpos
+			WTYPEANCHOR     :6,  // Lock one particle at location xpos,ypos,zpos
 		},
 		TYPE:0, //one of the "wall_types" from above
 		KBOUNCY:1,//how bouncy is this wall
-		WALL_XPOS:2,
-		WALL_YPOS:3,
-		WALL_ZPOS:4,
-		SIZE:5,
-		AFFECTED_PARTICLES:6,//instance of "affected particle set"
-		PART_INDEX1:7,		 //index of particle affected by constraint
-		PART_INDEX2:8,
+		WALLXPOS:2,
+		WALLYPOS:3,
+		WALLZPOS:4,
+		RADIUS:5,
+		AFFECTEDPARTICLES:6,//instance of "affected particle set"
+		PARTINDEX1:7,		 //index of particle affected by constraint
+		PARTINDEX2:8,
 		
-		WALL_STRIDE:9, //stride of a wall object
+		WALLSTRIDE:9, //stride of a wall object
 	}
 	this.force_vars = {
 		force_types: {
-			F_NONE      :0,       // Non-existent force: ignore this CForcer object
-			F_MOUSE     :1,       // Spring-like connection to the mouse cursor; lets
+			FNONE      :0,       // Non-existent force: ignore this CForcer object
+			FMOUSE     :1,       // Spring-like connection to the mouse cursor; lets
 			// you 'grab' and 'wiggle' one particle(or several).
-			F_GRAV_E    :2,       // Earth-gravity: pulls all particles 'downward'.
-			F_GRAV_P    :3,       // Planetary-gravity; particle-pair (e0,e1) attract
+			FGRAVE    :2,       // Earth-gravity: pulls all particles 'downward'.
+			FGRAVP    :3,       // Planetary-gravity; particle-pair (e0,e1) attract
 			// each other with force== grav* mass0*mass1/ dist^2
-			F_WIND      :4,       // Blowing-wind-like force-field;fcn of 3D position
-			F_BUBBLE    :5,       // Constant inward force towards centerpoint if
+			FWIND      :4,       // Blowing-wind-like force-field;fcn of 3D position
+			FBUBBLE    :5,       // Constant inward force towards centerpoint if
 			// particle is > max_radius away from centerpoint.
-			F_DRAG      :6,       // Viscous drag -- proportional to neg. velocity.
-			F_SPRING    :7,       // ties together 2 particles; distance sets force
-			F_SPRINGSET :8,       // a big collection of identical springs; lets you
+			FDRAG      :6,       // Viscous drag -- proportional to neg. velocity.
+			FSPRING    :7,       // ties together 2 particles; distance sets force
+			FSPRINGSET :8,       // a big collection of identical springs; lets you
 			// make cloth & rubbery shapes as one force-making
 			// object, instead of many many F_SPRING objects.
-			F_CHARGE    :9,       // attract/repel by charge and inverse distance;
+			FCHARGE    :9,       // attract/repel by charge and inverse distance;
 			// applies to all charged particles.
 		},
 		TYPE:0,//one of the force_types from above
@@ -367,19 +368,19 @@ var ParticleSystem = function(glContext){
 		DIRY:5,
 		DIRZ:6,
 		STRENGTH:7,
-		REST_STRENGTH:8,// Less than this treat as strength zero
-		AFFECTED_PARTICLES:9,//type "affected particle set"
-		PART_INDEX1:10,
-		PART_INDEX2:11,
+		RESTSTRENGTH:8,// Less than this treat as strength zero
+		AFFECTEDPARTICLES:9,//type "affected particle set"
+		PARTINDEX1:10,
+		PARTINDEX2:11,
 		
-		FORCE_STRIDE:12,
+		FORCESTRIDE:12,
 	}
 	this.initBuffers = function(){
-		this.forceBuffer = new Float32Array(this.forceBufferSize * this.force_vars.FORCE_STRIDE)
-		this.wallBuffer = new Float32Array(this.wallBufferSize * this.wall_vars.WALL_STRIDE)
+		this.forceBuffer = new Float32Array(this.forceBufferSize * this.force_vars.FORCESTRIDE)
+		this.wallBuffer = new Float32Array(this.wallBufferSize * this.wall_vars.WALLSTRIDE)
 	
 		for(key in this.particleBuffers){
-			this.particleBuffers[key] = new Float32Array(this.particleBufferSize * this.particle_vars.PARTICLE_STRIDE);
+			this.particleBuffers[key] = new Float32Array(this.particleBufferSize * this.particle_vars.PARTICLESTRIDE);
 		}
 		
 		this.ps0BufferID = gl.createBuffer()
@@ -400,7 +401,7 @@ var ParticleSystem = function(glContext){
 		}
 		
 		//current force index
-		var i = (this.numForces-1) * this.force_vars.FORCE_STRIDE
+		var i = (this.numForces-1) * this.force_vars.FORCESTRIDE
 		
 		//iterate through array_literal and add to buffer
 		for(key in array_literal){
@@ -409,7 +410,7 @@ var ParticleSystem = function(glContext){
 			var value = array_literal[key]
 			if(key == "TYPE")//special case since type must be converted to int
 				value = this.force_vars.force_types[value]
-			if(key == "AFFECTED_PARTICLES")
+			if(key == "AFFECTEDPARTICLES")
 				value = this.affected_particle_set[value]
 		
 			//set value
@@ -428,7 +429,7 @@ var ParticleSystem = function(glContext){
 		}
 		
 		//current force index
-		var i = (this.numWalls-1) * this.wall_vars.WALL_STRIDE
+		var i = (this.numWalls-1) * this.wall_vars.WALLSTRIDE
 		
 		//iterate through array_literal and add to buffer
 		for(key in array_literal){
@@ -437,7 +438,7 @@ var ParticleSystem = function(glContext){
 			var value = array_literal[key]
 			if(key == "TYPE")//special case since type must be converted to int
 				value = this.wall_vars.wall_types[value]
-			if(key == "AFFECTED_PARTICLES")
+			if(key == "AFFECTEDPARTICLES")
 				value = this.affected_particle_set[value]
 		
 			//set value
@@ -453,7 +454,7 @@ var ParticleSystem = function(glContext){
 		}
 		
 		//current force index
-		var i = (this.numParticles-1) * this.particle_vars.PARTICLE_STRIDE
+		var i = (this.numParticles-1) * this.particle_vars.PARTICLESTRIDE
 		
 		//iterate through array_literal and add to buffer
 		for(key in array_literal){
@@ -462,32 +463,43 @@ var ParticleSystem = function(glContext){
 			this.activeParticleBuffer[i + var_offset] =  array_literal[key]
 		}
 	}
-	this.addBox = function(x,y,z,legth,WTYPE_BOXIN_OR_WTYPE_BOXOUT){
+	this.addBoxIn= function(x,y,z,length){
 		this.addWall({
-			TYPE:WTYPE_BOXIN_OR_WTYPE_BOXOUT,
+			'TYPE':'WTYPEBOXIN',
+			'KBOUNCY':0.8,
+			'WALLXPOS':x,
+			'WALLYPOS':y,
+			'WALLZPOS':z,
+			'RADIUS':length,
+			'AFFECTEDPARTICLES':"ALL"
+		})
+	}
+	this.addBoxOut= function(x,y,z,legth){
+		this.addWall({
+			TYPE:"WTYPEBOXOUT",
 			KBOUNCY:0.8,
-			WALL_XPOS:x,
-			WALL_YPOS:y,
-			WALL_ZPOS:z,
-			SIZE:length,
-			AFFECTED_PARTICLES:"ALL"
+			WALLXPOS:x,
+			WALLYPOS:y,
+			WALLZPOS:z,
+			RADIUS:length,
+			AFFECTEDPARTICLES:"ALL"
 		})
 	}
 	this.addSphere = function(x,y,x,radius){
 		this.addWall({
-			TYPE:"WTYPE_SPHERE",
-			KBOUNCY:0.8,
-			WALL_XPOS:x,
-			WALL_YPOS:y,
-			WALL_ZPOS:z,
-			SIZE:radius,
+			TYPE:"WTYPESPHERE",
+			KBOUNCY:0.5,
+			WALLXPOS:x,
+			WALLYPOS:y,
+			WALLZPOS:z,
+			RADIUS:radius,
 			AFFECTED_PARTICLES:"ALL"
 		})
 	
 	}
 	this.addGravity = function(strength){
 		this.addForce({
-			TYPE:"F_GRAV_E", 
+			TYPE:"FGRAVE", 
 			AFECTED_PARTICLES: "ALL",
 		})
 	}
@@ -513,18 +525,18 @@ var ParticleSystem = function(glContext){
 		
 		var inv = new Matrix4().setInverseOf(projView)
 		
-		var clickCoord = inv.multiplyVector4( new Vector4([x,y,0.1,1.0]) )
+		var clickCoord = inv.multiplyVector4( new Vector4([x,y,0.8,1.0]) )
 		var xdir = (clickCoord.elements[0]/ clickCoord.elements[3]) - rend.cam0.eye.x()
 		var ydir = (clickCoord.elements[1]/ clickCoord.elements[3]) - rend.cam0.eye.y()
 		var zdir = (clickCoord.elements[2]/ clickCoord.elements[3]) - rend.cam0.eye.z()
 		
 		this.addParticle({
-			"PART_XPOS":rend.cam0.eye.x(),
-			"PART_YPOS":rend.cam0.eye.y(),
-			"PART_ZPOS":rend.cam0.eye.z(),
-			"PART_XVEL": xdir*6,
-			"PART_YVEL": ydir*6,
-			"PART_ZVEL": zdir*6,
+			"PARTXPOS":rend.cam0.eye.x(),
+			"PARTYPOS":rend.cam0.eye.y(),
+			"PARTZPOS":rend.cam0.eye.z(),
+			"PARTXVEL": xdir*3,
+			"PARTYVEL": ydir*3,
+			"PARTZVEL": zdir*3,
 		})
 	}
 	this.solvers = {
@@ -532,13 +544,16 @@ var ParticleSystem = function(glContext){
 	}
 	this.sovler = null
 	this.getForceVar = function(i,var_name){
-		return this.forceBuffer[ (i * this.force_vars.FORCE_STRIDE) + this.force_vars[var_name] ]
+		return this.forceBuffer[ (i * this.force_vars.FORCESTRIDE) + this.force_vars[var_name] ]
+	}
+	this.getWallVar = function(i,var_name){
+		return this.wallBuffer[ (i * this.wall_vars.WALLSTRIDE) + this.wall_vars[var_name] ]
 	}
 	this.getParticleVar = function(i,var_name){
-		return this.activeParticleBuffer[ (i * this.particle_vars.PARTICLE_STRIDE) + this.particle_vars[var_name] ]
+		return this.activeParticleBuffer[ (i * this.particle_vars.PARTICLESTRIDE) + this.particle_vars[var_name] ]
 	}
 	this.setParticleVar = function(i, var_name, value){
-		this.activeParticleBuffer[ (i * this.particle_vars.PARTICLE_STRIDE) + this.particle_vars[var_name] ] = value
+		this.activeParticleBuffer[ (i * this.particle_vars.PARTICLESTRIDE) + this.particle_vars[var_name] ] = value
 	}
 	this.applyAllForces = function(){
 		//apply velocities
@@ -546,30 +561,93 @@ var ParticleSystem = function(glContext){
 		
 			var force_type = this.getForceVar(i,"TYPE")
 			switch(force_type){
-				case 2://F_GRAV_E
+				case 2://FGRAVE
 					for(var p = 0; p < this.numParticles; p++){
-						var yvel = this.getParticleVar(p, "PART_YVEL")
-						this.setParticleVar(p,"PART_YVEL", yvel - 0.0025)
+						var yvel = this.getParticleVar(p, "PARTYVEL")
+						this.setParticleVar(p,"PARTYVEL", yvel - 0.0025)
 					}
 			}
 		}
 		//move particles according to velocity
 		for(var p = 0; p < this.numParticles; p++){
-			var zvel = this.getParticleVar(p, "PART_ZVEL")
-			var xvel = this.getParticleVar(p, "PART_XVEL")
-			var yvel = this.getParticleVar(p, "PART_YVEL")
+			var zvel = this.getParticleVar(p, "PARTZVEL")
+			var xvel = this.getParticleVar(p, "PARTXVEL")
+			var yvel = this.getParticleVar(p, "PARTYVEL")
 			
-			var zpos = this.getParticleVar(p, "PART_ZPOS")
-			var xpos = this.getParticleVar(p, "PART_XPOS")
-			var ypos = this.getParticleVar(p, "PART_YPOS")
+			var zpos = this.getParticleVar(p, "PARTZPOS")
+			var xpos = this.getParticleVar(p, "PARTXPOS")
+			var ypos = this.getParticleVar(p, "PARTYPOS")
 			
-			this.setParticleVar(p,"PART_ZPOS", zpos + zvel)
-			this.setParticleVar(p,"PART_XPOS", xpos + xvel)
-			this.setParticleVar(p,"PART_YPOS", ypos + yvel)
+			this.setParticleVar(p,"PARTZPOS", zpos + zvel)
+			this.setParticleVar(p,"PARTXPOS", xpos + xvel)
+			this.setParticleVar(p,"PARTYPOS", ypos + yvel)
 		}
 	
 	}
 	this.applyAllWalls = function(){
+		for(var i = 0; i < this.numWalls; i++){
+		
+			var wall_type = this.getWallVar(i,"TYPE")
+			switch(wall_type){
+				case 1://BOX IN
+					for(var p = 0; p < this.numParticles; p++){
+						var xpos = this.getParticleVar(p, "PARTXPOS")
+						var ypos = this.getParticleVar(p, "PARTYPOS")
+						var zpos = this.getParticleVar(p, "PARTZPOS")
+						var xvel = this.getParticleVar(p, "PARTXVEL")
+						var yvel = this.getParticleVar(p, "PARTYVEL")
+						var zvel = this.getParticleVar(p, "PARTZVEL")
+						
+						var boxX = this.getWallVar(i,"WALLXPOS")
+						var boxY = this.getWallVar(i,"WALLYPOS")
+						var boxZ = this.getWallVar(i,"WALLZPOS")
+						
+						var rad = this.getWallVar(i,"RADIUS")
+						
+						//reverse x
+						if(xpos > boxX + rad ){
+							this.setParticleVar(p,"PARTXPOS", boxX + rad )
+							this.setParticleVar(p,"PARTXVEL", xvel * -1)
+						}
+						if( xpos < boxX - rad){
+							this.setParticleVar(p,"PARTXPOS", boxX - rad )
+							this.setParticleVar(p,"PARTXVEL", xvel * -1)
+						}
+						
+						//reverse y
+						if(ypos > boxY + rad ){
+							this.setParticleVar(p,"PARTYPOS", boxY + rad )
+							this.setParticleVar(p,"PARTYVEL", yvel * -1)
+						}
+						if( ypos < boxY - rad){
+							this.setParticleVar(p,"PARTYPOS", boxY - rad )
+							this.setParticleVar(p,"PARTYVEL", yvel * -1)
+						}
+						
+						//reverse z
+						if(zpos > boxZ + rad ){
+							this.setParticleVar(p,"PARTZPOS", boxZ + rad )
+							this.setParticleVar(p,"PARTZVEL", zvel * -1)
+						}
+						if(zpos < boxZ - rad){
+							this.setParticleVar(p,"PARTZPOS", boxZ - rad )
+							this.setParticleVar(p,"PARTZVEL", zvel * -1)
+						}
+						
+					}
+				case 2://BOX OUT
+					for(var p = 0; p < this.numParticles; p++){
+						var yvel = this.getParticleVar(p, "PARTYVEL")
+						this.setParticleVar(p,"PARTYVEL", yvel - 0.0025)
+					}
+				case 3://SPHERE
+					for(var p = 0; p < this.numParticles; p++){
+						var yvel = this.getParticleVar(p, "PARTYVEL")
+						this.setParticleVar(p,"PARTYVEL", yvel - 0.0025)
+					}
+			}
+		
+		}
 	
 	}
 	this.draw = function(){
@@ -579,7 +657,7 @@ var ParticleSystem = function(glContext){
 		gl.bindBuffer(gl.ARRAY_BUFFER, this.activeParticleBufferID);
 		gl.bufferData(gl.ARRAY_BUFFER, this.activeParticleBuffer, gl.DYNAMIC_DRAW);
 		//attributeID, size of vector, type, normalized?, stride, offset
-		var stride = this.particle_vars.PARTICLE_STRIDE * this.activeParticleBuffer.BYTES_PER_ELEMENT
+		var stride = this.particle_vars.PARTICLESTRIDE * this.activeParticleBuffer.BYTES_PER_ELEMENT
 		gl.vertexAttribPointer(a_PositionID,3,gl.FLOAT, false, stride,0)
 		gl.drawArrays(gl.POINTS, 0, this.numParticles);
 	}
