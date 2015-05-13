@@ -45,64 +45,73 @@ var canvas //canvas element
 var Renderer = function(){
 	 var Camera = function(){
 		//look down the z negative axis
-		this.eyeX = 0
-		this.eyeY = 0.5
-		this.eyeZ = 0
-		this.atX = 0
-		this.atY = 0
-		this.atZ = -1
-		this.upX = 0
-		this.upY = 1
-		this.upZ = 0
+		this.eye = new Vector3([0,0.5,0])
+		this.at = new Vector3([0,0,-1])
+		this.up = new Vector3([0,1,0])
 		this.fovy  = 70
 		this.aspect  = 1.0
 		this.near = .01
 		this.far  = 100
 		
-		this.pan = 0
-		this.tilt = 0
-		this.roll = 0
-		
-		this.transX = 0
-		this.transY = 0
-		this.transZ = 0
+		this.pan = function(deg){
+			this.at = new Matrix4().setRotate(-deg,this.up.x(),this.up.y(),this.up.z()).multiplyVector3(this.at)
+		}
+		this.tilt = function(deg){
+			var crss = this.at.cross(this.up)//vec parrallel to both
+			this.at = new Matrix4().setRotate(deg, crss.x(), crss.y(), crss.z()).multiplyVector3(this.at)
+			this.up = new Matrix4().setRotate(deg, crss.x(), crss.y(), crss.z()).multiplyVector3(this.up)
+		}
+		this.roll = function(deg){
+			this.up = new Matrix4().setRotate(deg,this.at.x(),this.at.y(),this.at.z()).multiplyVector3(this.up)
+		}
+
+		this.transX = function(unit){
+			this.at.elements[0] = this.at.x() + unit
+			this.eye.elements[0] = this.eye.x() + unit
+		}
+		this.transY = function(unit){
+			this.at.elements[1] = this.at.y() + unit
+			this.eye.elements[1] = this.eye.y() + unit
+		}
+		this.transZ = function(unit){
+			this.at.elements[2] = this.at.z() + unit
+			this.eye.elements[2] = this.eye.z() + unit
+		}
 		
 		this.projectionMatrix = function(){
 			return new Matrix4().setPerspective(this.fovy, this.aspect, this.near, this.far)
 		}
 		this.viewMatrix = function(){
-			var vm =  new Matrix4().setLookAt(this.eyeX, this.eyeY, this.eyeZ, this.atX, this.atY, this.atZ, this.upX, this.upY, this.upZ)
-			var vmrotated = vm.rotate(this.pan,0,1,0).rotate(this.tilt,1,0,0).rotate(this.roll,0,0,1)
-			return vmrotated.translate(this.transX,this.transY,this.transZ)
+			return new Matrix4().setLookAt(this.eye.x(), this.eye.y(), this.eye.z(), this.at.x(), this.at.y(), this.at.z(), this.up.x(), this.up.y(), this.up.z())
 		}
 		
 		this.keyboardControl = function(ev){
 			var speed = 2
 			switch(ev.keyCode) {
 				case 39://right arrow
-					this.pan += speed;break
+					this.pan(speed);break
 				case 37://left arrow
-					this.pan -= speed;break
+					this.pan(-speed);break
 				case 38://up arrow
-					this.tilt += speed;break
+					this.tilt(speed);break
 				case 40://down arrow
-					this.tilt -= speed;break
+					this.tilt(-speed);break
 				case 65://a
-					this.transX += speed/40;break
+					this.transX(speed/40);break
 				case 90://z
-					this.transX -= speed/40;break
+					this.transX(-speed/40);break
 				case 83://s           
-					this.transY += speed/40;break
+					this.transY(speed/40);break
 				case 88://x           
-					this.transY -= speed/40;break
+					this.transY(-speed/40);break
 				case 68://d           
-					this.transZ += speed/40;break
+					this.transZ(speed/40);break
 				case 67://c           
-					this.transZ -= speed/40;break
+					this.transZ(-speed/40);break
 				case 70://f
-					this.roll += speed;break
+					this.roll(speed);break
 				case 86://v
-					this.roll -= speed;break
+					this.roll(-speed);break
 			}
 		
 		}
@@ -489,10 +498,33 @@ var ParticleSystem = function(glContext){
 	
 	}
 	this.shootParticleMouseHandler = function(ev){
+	
+		var rect = ev.target.getBoundingClientRect();	    // get canvas corners in pixels
+		var xp = ev.clientX - rect.left;					//x==0 at canvas left edge
+		var yp = canvas.height - (ev.clientY - rect.top);	//y==0 at canvas bottom edge
+  
+		// Convert to Canonical View Volume (CVV) coordinates too:
+		var x = (xp - canvas.width/2)  / (canvas.width/2);			// normalize canvas to -1 <= x < +1,
+		var y = (yp - canvas.height/2) / (canvas.height/2);
+	
+		var proj = rend.cam0.projectionMatrix()
+		var view = rend.cam0.viewMatrix()
+		var projView = proj.multiply(view)
+		
+		var inv = new Matrix4().setInverseOf(projView)
+		
+		var clickCoord = inv.multiplyVector4( new Vector4([x,y,0.1,1.0]) )
+		var xdir = (clickCoord.elements[0]/ clickCoord.elements[3]) - rend.cam0.eye.x()
+		var ydir = (clickCoord.elements[1]/ clickCoord.elements[3]) - rend.cam0.eye.y()
+		var zdir = (clickCoord.elements[2]/ clickCoord.elements[3]) - rend.cam0.eye.z()
+		
 		this.addParticle({
-			"PART_XPOS":0,
-			"PART_YPOS":5,
-			"PART_ZPOS":-2,
+			"PART_XPOS":rend.cam0.eye.x(),
+			"PART_YPOS":rend.cam0.eye.y(),
+			"PART_ZPOS":rend.cam0.eye.z(),
+			"PART_XVEL": xdir*6,
+			"PART_YVEL": ydir*6,
+			"PART_ZVEL": zdir*6,
 		})
 	}
 	this.solvers = {
