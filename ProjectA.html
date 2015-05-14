@@ -1,6 +1,13 @@
 <body>
+<button type="button" onclick="rend.partSys.addCharge(0,0,-2,5)">Add charge in middle</button>
+<button type="button" onclick="rend.circleCamera = true">Circle Camera ON</button>
+<button type="button" onclick="rend.circleCamera = false">Circle Camera OFF</button>
+Camera Key Controls: (position) a,z,s,x,d,c (aim) arrow keys + f,v,
 <canvas id="glcanvas" width="1024" height="768">
 </canvas>
+
+
+
 
 <script src="lib/webgl-utils.js"></script>
 <script src="lib/webgl-debug.js"></script>
@@ -14,7 +21,7 @@ precision mediump float;
 varying vec4 vColor;
 
 void main(void) {
-	gl_FragColor = vec4(1.0,1.0,1.0,1.0);
+	gl_FragColor = vColor;
 }
 </script>
 
@@ -24,13 +31,14 @@ attribute vec3 a_Position;
 uniform mat4 uViewMatrix;
 uniform mat4 uProjMatrix;
 uniform mat4 uModelMatrix;
+uniform vec4 aColor;
 
 varying vec4 vColor;
 
 void main(void) {
 	gl_Position = uProjMatrix * uViewMatrix * uModelMatrix * vec4(a_Position, 1.0);
 	gl_PointSize = 10.0;
-	vColor = vec4(1.0,1.0,1.0,1.0);
+	vColor = aColor;
 }
 </script>
 
@@ -43,12 +51,15 @@ var a_PositionID
 var a_ColorID 
 var canvas //canvas element
 var uModelMatrixID
+var mouseDown = 0;
+var MouseX
+var MouseY
 
 var Renderer = function(){
 	 var Camera = function(){
 		//look down the z negative axis
-		this.eye = new Vector3([0,4,4])
-		this.at = new Vector3([0,3,-5])
+		this.eye = new Vector3([0,3,6])
+		this.at = new Vector3([0,0,0])
 		this.up = new Vector3([0,1,0])
 		this.fovy  = 70
 		this.aspect  = 1.0
@@ -120,6 +131,7 @@ var Renderer = function(){
 		
 	}
 	this.cam0 = new Camera()
+	this.circleCamera=false //circle the camera around center point
 	this.uViewMatrixID
 	this.uProjMatrixID 
 	this.partSys
@@ -128,9 +140,11 @@ var Renderer = function(){
 	
 		//gl setup
 		canvas = document.getElementById("glcanvas")
+		canvas.width = window.innerWidth * .90
+		canvas.height = window.innerHeight * .90
 		gl = WebGLUtils.setupWebGL(canvas)
 
-		gl.viewport(0,0,1024,768)
+		gl.viewport(0,0,canvas.width,canvas.height)
 		gl.clearColor(0.0, 0.0, 0.0, 1.0)                     
 		gl.enable(gl.DEPTH_TEST)                              
 		gl.depthFunc(gl.LEQUAL)  
@@ -171,6 +185,9 @@ var Renderer = function(){
 		uModelMatrixID = gl.getUniformLocation(shaderProgram, 'uModelMatrix')
 		if(uModelMatrixID < 0) console.log('Failed to get the gfx storage location of uModelMatrix')
 		
+		//model matrix location
+		a_ColorID = gl.getUniformLocation(shaderProgram, 'aColor')
+		
 		//groundplane
 		this.ground_plane = new GroundPlane(gl,"Y", 60, .2)
 		this.ground_plane.init()
@@ -182,8 +199,20 @@ var Renderer = function(){
 		//keyboard control
 		window.addEventListener("keydown", this.cam0.keyboardControl.bind(this.cam0), false);
 		
-		//mouse control
-		window.addEventListener("mousedown", this.partSys.shootParticleMouseHandler.bind(this.partSys), false);
+		document.body.onmousedown = function() { 
+			  ++mouseDown;
+		}
+		
+		document.body.onmouseup = function() {
+			--mouseDown;
+		}
+		
+		document.body.onmousemove = function(ev) {
+				var rect = ev.target.getBoundingClientRect();	    // get canvas corners in pixels
+				MouseX = ev.clientX - rect.left;					//x==0 at canvas left edge
+				MouseY = canvas.height - (ev.clientY - rect.top);	//y==0 at canvas bottom edge
+		}
+		
 		
 		//add gravity
 		this.partSys.addGravity()
@@ -196,12 +225,19 @@ var Renderer = function(){
 	this.draw = function(){
 		gl.clear(gl.COLOR_BUFFER_BIT)
 		
+		if(this.circleCamera){
+			this.cam0.eye = new Matrix4().setRotate(0.1, 0, 1, 0).multiplyVector3(this.cam0.eye)
+		}
+			
+		
 		//set camera placement
 		gl.uniformMatrix4fv(uProjMatrixID, false, this.cam0.projectionMatrix().elements)
 		gl.uniformMatrix4fv(uViewMatrixID, false, this.cam0.viewMatrix().elements)
 		
 		//model matrix is used by the models - set to identity for now
 		gl.uniformMatrix4fv(uModelMatrixID, false, new Matrix4().elements)
+		
+		gl.uniform4fv(a_ColorID, new Float32Array([1,1,1,1]))
 		
 		this.ground_plane.draw()
 		this.partSys.draw()
@@ -260,7 +296,9 @@ var GroundPlane = function(glContext, axis, num_lines, spacing){
 		//attributeID, size of vector, type, normalized?, stride, offset
 		gl.vertexAttribPointer(a_PositionID,3,gl.FLOAT, false, 0,0)
 		
+		gl.uniform4fv(a_ColorID, new Float32Array([1,0,1,1]))
 		gl.drawArrays(gl.LINES, 0, num_lines * 4);
+		gl.uniform4fv(a_ColorID, new Float32Array([1,1,1,1]))
 	}
 }
 
@@ -304,10 +342,11 @@ var Box = function(x,y,z,len){
              1.0, -1.0,  1.0,
 
             // Left face
+			-1.0,  1.0,  1.0,
+            -1.0,  1.0, -1.0
             -1.0, -1.0, -1.0,
             -1.0, -1.0,  1.0,
-            -1.0,  1.0,  1.0,
-            -1.0,  1.0, -1.0
+
         ]
         this.cubeVertexIndices = [
             0, 1, 2,      0, 2, 3,    // Front face
@@ -331,7 +370,9 @@ var Box = function(x,y,z,len){
 			var model = new Matrix4().setTranslate(this.x, this.y, this.z).multiply( scale ) 
 			gl.uniformMatrix4fv(uModelMatrixID, false, model.elements)
 			
+			gl.uniform4fv(a_ColorID, new Float32Array([0,0.8,0.2,1]))
 			gl.drawElements(gl.TRIANGLES, 24, gl.UNSIGNED_SHORT, 0);
+			gl.uniform4fv(a_ColorID, new Float32Array([1,1,1,1]))
 			
 			//set back to identity
 			gl.uniformMatrix4fv(uModelMatrixID, false, new Matrix4().elements)
@@ -342,7 +383,7 @@ var Box = function(x,y,z,len){
 var ParticleSystem = function(glContext){
 	this.gl = glContext
 	
-	this.particleBufferSize = 1000 //starting size of buffer
+	this.particleBufferSize = 100000 //starting size of buffer
 	this.numParticles = 0 //0 particles to start out
 	this.particleBuffers = {//all buffers start as null
 		ps0      : null,
@@ -544,7 +585,7 @@ var ParticleSystem = function(glContext){
 	}
 	this.addParticle = function( array_literal ){
 		this.numParticles += 1
-		if(this.numParticles > this.particlesBufferSize){
+		if(this.numParticles >= this.particlesBufferSize){
 			alert("cannot add more Particles. need to implement buffer resizing")
 			return
 		}
@@ -606,7 +647,10 @@ var ParticleSystem = function(glContext){
 	
 		this.addForce({
 			TYPE:"FCHARGE",
-			STRENGTH:5.0,
+			STRENGTH:strength,
+			POSX:x,
+			POSY:y,
+			POSZ:z,
 			AFECTED_PARTICLES: "ALL",
 		})
 	
@@ -614,11 +658,9 @@ var ParticleSystem = function(glContext){
 	this.addFlock = function(x,y,z){
 	
 	}
-	this.shootParticleMouseHandler = function(ev){
-	
-		var rect = ev.target.getBoundingClientRect();	    // get canvas corners in pixels
-		var xp = ev.clientX - rect.left;					//x==0 at canvas left edge
-		var yp = canvas.height - (ev.clientY - rect.top);	//y==0 at canvas bottom edge
+		if(mouseDown)
+			this.shootParticle(ev)
+	this.shootParticle = function(xp,yp){
   
 		// Convert to Canonical View Volume (CVV) coordinates too:
 		var x = (xp - canvas.width/2)  / (canvas.width/2);			// normalize canvas to -1 <= x < +1,
@@ -687,9 +729,14 @@ var ParticleSystem = function(glContext){
 						var z = this.getParticleVar(p,buffer, "PARTZPOS")
 						
 						//calc force
-						var xForce = (1 / (x - chargeX)) * timestep
-						var yForce = (1 / (y - chargeZ)) * timestep
-						var zForce = (1 / (z - chargeZ)) * timestep
+						var dist = utils.distanceBetweenPoints(x,y,z,chargeX,chargeY,chargeZ)
+						var force = 0.08 / (dist + .000001)
+						var direction = new Vector3([x - chargeX, y - chargeY, z - chargeZ]).normalize()
+						
+						var xForce = force * direction.x()
+						var yForce = force * direction.y()
+						var zForce = force * direction.z()
+						
 						
 						//get current forces
 						var xftot = this.getParticleVar(p, buffer, "PARTXFTOT")
@@ -758,6 +805,7 @@ var ParticleSystem = function(glContext){
 						}
 						
 					}
+					break;
 				case 2://BOX OUT
 					for(var p = 0; p < this.numParticles; p++){
 						var xpos = this.getParticleVar(p, buffer, "PARTXPOS")
@@ -772,15 +820,21 @@ var ParticleSystem = function(glContext){
 						var boxZ = this.getWallVar(i,"WALLZPOS")
 						
 						var rad = this.getWallVar(i,"RADIUS")
+						var kbounce = this.getWallVar(i,"KBOUNCY")
 						
 						var insideBox = false
-						if( zpos < boxZ - rad && 
-							zpos > boxZ + rad &&
-							xpos < boxX - rad && 
-							xpos > boxX + rad &&
-							ypos < boxY - rad && 
-							ypos > boxY + rad)
+						if( zpos < (boxZ + rad) && 
+							xpos < (boxX + rad) &&
+							xpos > (boxX - rad) &&
+							ypos < (boxY + rad) &&
+							ypos > (boxY - rad) &&
+							
+							zpos > (boxZ - rad)){
 							insideBox = true
+							
+							 this.setParticleVar(p,buffer,"PARTZPOS", boxZ + rad )
+							 this.setParticleVar(p,buffer,"PARTZVEL", zvel * -1* kbounce)
+							}
 						
 						//reverse x
 
@@ -877,6 +931,9 @@ var ParticleSystem = function(glContext){
 	}
 	this.draw = function(timestep){
 		var timestep = 1/3 //constant timestep for now
+		
+		if(mouseDown)
+			this.shootParticle(MouseX,MouseY)
 	
 		//apply all force
 		this.applyAllForces(this.activeParticleBuffer, timestep)
@@ -914,7 +971,11 @@ var ParticleSystem = function(glContext){
 }
 
 var utils =  {
+	distanceBetweenPoints : function(x1,y1,z1,x2,y2,z2){
+		var sqrd = Math.pow(x1-x2,2) + Math.pow(y1-y2,2) + Math.pow(z1-z2,2)
+		return Math.sqrt(sqrd)
 	
+	},
 	getShader : function(gl, elementId) {
 		var shaderScript, theSource, currentChild, shader;
 
