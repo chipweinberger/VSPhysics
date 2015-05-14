@@ -354,8 +354,14 @@ var ParticleSystem = function(glContext){
 	}
 	this.ps0BufferID
 	this.ps1BufferID
+	
 	this.activeParticleBuffer
+	this.activeDotBuffer
 	this.activeParticleBufferID
+	
+	this.nonActiveParticleBuffer
+	this.nonActiveDotBuffer
+	this.nonActiveParticleBufferID
 	
 	this.forceBufferSize = 100 //starting size of buffer
 	this.numForces = 0 //0 forces to start out
@@ -472,7 +478,12 @@ var ParticleSystem = function(glContext){
 		this.ps1BufferID = gl.createBuffer()
 		
 		this.activeParticleBuffer = this.particleBuffers.ps0
+		this.activeDotBuffer = this.particleBuffers.ps0dot
 		this.activeParticleBufferID = this.ps0BufferID
+		
+		this.nonActiveParticleBuffer = this.particleBuffers.ps1
+		this.nonActiveDotBuffer = this.particleBuffers.ps1dot
+		this.nonActiveParticleBufferID = this.ps1BufferID
 		
 		gl.bindBuffer(gl.ARRAY_BUFFER, this.ps0BufferID);
 		gl.bufferData(gl.ARRAY_BUFFER, this.particleBuffers.ps0, gl.DYNAMIC_DRAW);
@@ -591,7 +602,13 @@ var ParticleSystem = function(glContext){
 			AFECTED_PARTICLES: "ALL",
 		})
 	}
-	this.addWind = function(x,y,z,dirX,dirY,dirZ, strength){
+	this.addCharge = function(x,y,z,strength){
+	
+		this.addForce({
+			TYPE:"FCHARGE",
+			STRENGTH:5.0,
+			AFECTED_PARTICLES: "ALL",
+		})
 	
 	}
 	this.addFlock = function(x,y,z){
@@ -625,66 +642,82 @@ var ParticleSystem = function(glContext){
 			"PARTXVEL": xdir*3,
 			"PARTYVEL": ydir*3,
 			"PARTZVEL": zdir*3,
+			"PARTMASS": 1,
 		})
 	}
-	this.solvers = {
-	
-	}
-	this.sovler = null
 	this.getForceVar = function(i,var_name){
 		return this.forceBuffer[ (i * this.force_vars.FORCESTRIDE) + this.force_vars[var_name] ]
 	}
 	this.getWallVar = function(i,var_name){
 		return this.wallBuffer[ (i * this.wall_vars.WALLSTRIDE) + this.wall_vars[var_name] ]
 	}
-	this.getParticleVar = function(i,var_name){
-		return this.activeParticleBuffer[ (i * this.particle_vars.PARTICLESTRIDE) + this.particle_vars[var_name] ]
+	this.getParticleVar = function(i, buffer,var_name){
+		return buffer[ (i * this.particle_vars.PARTICLESTRIDE) + this.particle_vars[var_name] ]
 	}
-	this.setParticleVar = function(i, var_name, value){
-		this.activeParticleBuffer[ (i * this.particle_vars.PARTICLESTRIDE) + this.particle_vars[var_name] ] = value
+	this.setParticleVar = function(i, buffer, var_name, value){
+		buffer[ (i * this.particle_vars.PARTICLESTRIDE) + this.particle_vars[var_name] ] = value
 	}
-	this.applyAllForces = function(){
-		//apply velocities
+	this.applyAllForces = function(buffer, timestep){
+		//first clear all particles FTOT to ZERO
+		for(var p = 0; p < this.numParticles; p++){
+			this.setParticleVar(p,buffer,"PARTXFTOT", 0)
+			this.setParticleVar(p,buffer,"PARTYFTOT", 0)
+			this.setParticleVar(p,buffer,"PARTZFTOT", 0)
+		}
+		//now accumulate forces
 		for(var i = 0; i < this.numForces; i++){
 		
 			var force_type = this.getForceVar(i,"TYPE")
 			switch(force_type){
 				case 2://FGRAVE
 					for(var p = 0; p < this.numParticles; p++){
-						var yvel = this.getParticleVar(p, "PARTYVEL")
-						this.setParticleVar(p,"PARTYVEL", yvel - 0.0025)
+						var ytot = this.getParticleVar(p, buffer, "PARTYFTOT")
+						this.setParticleVar(p, buffer, "PARTYFTOT", ytot - (0.06 * timestep))
 					}
+					break
+				case 9://charge
+					for(var p = 0; p < this.numParticles; p++){
+						//charge pos
+						var chargeX = this.getForceVar(i,"POSX")
+						var chargeY = this.getForceVar(i,"POSY")
+						var chargeZ = this.getForceVar(i,"POSZ")
+						//part pos
+						var x = this.getParticleVar(p,buffer, "PARTXPOS")
+						var y = this.getParticleVar(p,buffer, "PARTYPOS")
+						var z = this.getParticleVar(p,buffer, "PARTZPOS")
+						
+						//calc force
+						var xForce = (1 / (x - chargeX)) * timestep
+						var yForce = (1 / (y - chargeZ)) * timestep
+						var zForce = (1 / (z - chargeZ)) * timestep
+						
+						//get current forces
+						var xftot = this.getParticleVar(p, buffer, "PARTXFTOT")
+						var yftot = this.getParticleVar(p, buffer, "PARTYFTOT")
+						var zftot = this.getParticleVar(p, buffer, "PARTZFTOT")
+						//set forces
+						this.setParticleVar(p,buffer, "PARTXFTOT", xftot + xForce)
+						this.setParticleVar(p,buffer, "PARTYFTOT", yftot + yForce)
+						this.setParticleVar(p,buffer, "PARTZFTOT", zftot + zForce)
+					}
+					break
 			}
-		}
-		//move particles according to velocity
-		for(var p = 0; p < this.numParticles; p++){
-			var zvel = this.getParticleVar(p, "PARTZVEL")
-			var xvel = this.getParticleVar(p, "PARTXVEL")
-			var yvel = this.getParticleVar(p, "PARTYVEL")
-			
-			var zpos = this.getParticleVar(p, "PARTZPOS")
-			var xpos = this.getParticleVar(p, "PARTXPOS")
-			var ypos = this.getParticleVar(p, "PARTYPOS")
-			
-			this.setParticleVar(p,"PARTZPOS", zpos + zvel)
-			this.setParticleVar(p,"PARTXPOS", xpos + xvel)
-			this.setParticleVar(p,"PARTYPOS", ypos + yvel)
 		}
 	
 	}
-	this.applyAllWalls = function(){
+	this.applyAllWalls = function(buffer){
 		for(var i = 0; i < this.numWalls; i++){
 		
 			var wall_type = this.getWallVar(i,"TYPE")
 			switch(wall_type){
 				case 1://BOX IN
 					for(var p = 0; p < this.numParticles; p++){
-						var xpos = this.getParticleVar(p, "PARTXPOS")
-						var ypos = this.getParticleVar(p, "PARTYPOS")
-						var zpos = this.getParticleVar(p, "PARTZPOS")
-						var xvel = this.getParticleVar(p, "PARTXVEL")
-						var yvel = this.getParticleVar(p, "PARTYVEL")
-						var zvel = this.getParticleVar(p, "PARTZVEL")
+						var xpos = this.getParticleVar(p,buffer, "PARTXPOS")
+						var ypos = this.getParticleVar(p,buffer, "PARTYPOS")
+						var zpos = this.getParticleVar(p,buffer, "PARTZPOS")
+						var xvel = this.getParticleVar(p,buffer, "PARTXVEL")
+						var yvel = this.getParticleVar(p,buffer, "PARTYVEL")
+						var zvel = this.getParticleVar(p,buffer, "PARTZVEL")
 						
 						var boxX = this.getWallVar(i,"WALLXPOS")
 						var boxY = this.getWallVar(i,"WALLYPOS")
@@ -692,45 +725,47 @@ var ParticleSystem = function(glContext){
 						
 						var rad = this.getWallVar(i,"RADIUS")
 						
+						var kbounce = this.getWallVar(i,"KBOUNCY")
+						
 						//reverse x
 						if(xpos > boxX + rad ){
-							this.setParticleVar(p,"PARTXPOS", boxX + rad )
-							this.setParticleVar(p,"PARTXVEL", xvel * -1)
+							this.setParticleVar(p,buffer,"PARTXPOS", boxX + rad )
+							this.setParticleVar(p,buffer,"PARTXVEL", xvel * -1 * kbounce)
 						}
 						if( xpos < boxX - rad){
-							this.setParticleVar(p,"PARTXPOS", boxX - rad )
-							this.setParticleVar(p,"PARTXVEL", xvel * -1)
+							this.setParticleVar(p,buffer,"PARTXPOS", boxX - rad )
+							this.setParticleVar(p,buffer,"PARTXVEL", xvel * -1 * kbounce)
 						}
 						
 						//reverse y
 						if(ypos > boxY + rad ){
-							this.setParticleVar(p,"PARTYPOS", boxY + rad )
-							this.setParticleVar(p,"PARTYVEL", yvel * -1)
+							this.setParticleVar(p,buffer,"PARTYPOS", boxY + rad )
+							this.setParticleVar(p,buffer,"PARTYVEL", yvel * -1 * kbounce)
 						}
 						if( ypos < boxY - rad){
-							this.setParticleVar(p,"PARTYPOS", boxY - rad )
-							this.setParticleVar(p,"PARTYVEL", yvel * -1)
+							this.setParticleVar(p,buffer,"PARTYPOS", boxY - rad )
+							this.setParticleVar(p,buffer,"PARTYVEL", yvel * -1 * kbounce)
 						}
 						
 						//reverse z
 						if(zpos > boxZ + rad ){
-							this.setParticleVar(p,"PARTZPOS", boxZ + rad )
-							this.setParticleVar(p,"PARTZVEL", zvel * -1)
+							this.setParticleVar(p,buffer,"PARTZPOS", boxZ + rad )
+							this.setParticleVar(p,buffer,"PARTZVEL", zvel * -1* kbounce)
 						}
 						if(zpos < boxZ - rad){
-							this.setParticleVar(p,"PARTZPOS", boxZ - rad )
-							this.setParticleVar(p,"PARTZVEL", zvel * -1)
+							this.setParticleVar(p,buffer,"PARTZPOS", boxZ - rad )
+							this.setParticleVar(p,buffer,"PARTZVEL", zvel * -1* kbounce)
 						}
 						
 					}
 				case 2://BOX OUT
 					for(var p = 0; p < this.numParticles; p++){
-						var xpos = this.getParticleVar(p, "PARTXPOS")
-						var ypos = this.getParticleVar(p, "PARTYPOS")
-						var zpos = this.getParticleVar(p, "PARTZPOS")
-						var xvel = this.getParticleVar(p, "PARTXVEL")
-						var yvel = this.getParticleVar(p, "PARTYVEL")
-						var zvel = this.getParticleVar(p, "PARTZVEL")
+						var xpos = this.getParticleVar(p, buffer, "PARTXPOS")
+						var ypos = this.getParticleVar(p, buffer, "PARTYPOS")
+						var zpos = this.getParticleVar(p, buffer, "PARTZPOS")
+						var xvel = this.getParticleVar(p, buffer, "PARTXVEL")
+						var yvel = this.getParticleVar(p, buffer, "PARTYVEL")
+						var zvel = this.getParticleVar(p, buffer, "PARTZVEL")
 						
 						var boxX = this.getWallVar(i,"WALLXPOS")
 						var boxY = this.getWallVar(i,"WALLYPOS")
@@ -762,10 +797,95 @@ var ParticleSystem = function(glContext){
 		}
 	
 	}
-	this.draw = function(){
-		this.applyAllForces()
-		this.applyAllWalls()
+	this.dotMaker = function(part_buffer, dot_buffer){
+		for(var i = 0; i < this.numParticles; i++){
+			//copy over velocities
+			var xvel = this.getParticleVar(i,part_buffer,"PARTXVEL")
+			var yvel = this.getParticleVar(i,part_buffer,"PARTYVEL")
+			var zvel = this.getParticleVar(i,part_buffer,"PARTZVEL")
+			this.setParticleVar(i,dot_buffer,"PARTXPOS", xvel)
+			this.setParticleVar(i,dot_buffer,"PARTYPOS", yvel)
+			this.setParticleVar(i,dot_buffer,"PARTZPOS", zvel)
+			
+			//compute and set velocities
+			var mass = this.getParticleVar(i,part_buffer,"PARTMASS")
+			var ftotx = this.getParticleVar(i,part_buffer,"PARTXFTOT")
+			var ftoty = this.getParticleVar(i,part_buffer,"PARTYFTOT")
+			var ftotz = this.getParticleVar(i,part_buffer,"PARTZFTOT")
+			var accx = ftotx / mass
+			var accy = ftoty / mass
+			var accz = ftotz / mass
+			
+			this.setParticleVar(i,dot_buffer,"PARTXVEL", accx)
+			this.setParticleVar(i,dot_buffer,"PARTYVEL", accy)
+			this.setParticleVar(i,dot_buffer,"PARTZVEL", accz)
+	
+		}
+	
+	}
+	this.solvers = {
+			//s1 = s0 + h*s0dot	
+			"explicit_euler": function(non_active_part_buffer, part_buffer, dot_buffer , timestep){
+					for(var i = 0; i < this.numParticles; i++){
+					
+						//part
+						var partx = this.getParticleVar(i,part_buffer, "PARTXPOS")
+						var party = this.getParticleVar(i,part_buffer, "PARTYPOS")
+						var partz = this.getParticleVar(i,part_buffer, "PARTZPOS")
+						
+						var partxvel = this.getParticleVar(i,part_buffer, "PARTXVEL")
+						var partyvel = this.getParticleVar(i,part_buffer, "PARTYVEL")
+						var partzvel = this.getParticleVar(i,part_buffer, "PARTZVEL")
+						
+						//dot
+						var dotx = this.getParticleVar(i,dot_buffer, "PARTXPOS")
+						var doty = this.getParticleVar(i,dot_buffer, "PARTYPOS")
+						var dotz = this.getParticleVar(i,dot_buffer, "PARTZPOS")
+						
+						var dotxvel = this.getParticleVar(i,dot_buffer, "PARTXVEL")
+						var dotyvel = this.getParticleVar(i,dot_buffer, "PARTYVEL")
+						var dotzvel = this.getParticleVar(i,dot_buffer, "PARTZVEL")
+						
+						//add
+						this.setParticleVar(i,part_buffer,"PARTXPOS", partx + (dotx * timestep))
+						this.setParticleVar(i,part_buffer,"PARTYPOS", party + (doty * timestep))
+						this.setParticleVar(i,part_buffer,"PARTZPOS", partz + (dotz * timestep))
+			
+						this.setParticleVar(i,part_buffer,"PARTXVEL", partxvel + (dotxvel * timestep))
+						this.setParticleVar(i,part_buffer,"PARTYVEL", partyvel + (dotyvel * timestep))
+						this.setParticleVar(i,part_buffer,"PARTZVEL", partzvel + (dotzvel * timestep))
+						
+					}
+			},
 		
+		}
+	this.solve
+	this.swapBuffers = function(){
+	
+		var temp	 = this.activeParticleBuffer
+		var tempdot  = this.activeDotBuffer
+		var tempID	 = this.activeParticleBufferID
+	
+		this.activeParticleBuffer = this.nonActiveParticleBuffer
+		this.activeDotBuffer = this.nonActiveDotBuffer
+		this.activeParticleBufferID = this.nonActiveParticleBufferID
+		
+		this.nonActiveParticleBuffer = temp
+		this.nonActiveDotBuffer = tempdot
+		this.nonActiveParticleBufferID = tempID
+	
+	}
+	this.draw = function(timestep){
+		var timestep = 1/3 //constant timestep for now
+	
+		//apply all force
+		this.applyAllForces(this.activeParticleBuffer, timestep)
+	
+		//call dot maker on active particle buffer
+		this.dotMaker(this.activeParticleBuffer, this.activeDotBuffer)
+	
+	
+		//render active Particle buffer
 		gl.bindBuffer(gl.ARRAY_BUFFER, this.activeParticleBufferID);
 		gl.bufferData(gl.ARRAY_BUFFER, this.activeParticleBuffer, gl.DYNAMIC_DRAW);
 		//attributeID, size of vector, type, normalized?, stride, offset
@@ -773,93 +893,23 @@ var ParticleSystem = function(glContext){
 		gl.vertexAttribPointer(a_PositionID,3,gl.FLOAT, false, stride,0)
 		gl.drawArrays(gl.POINTS, 0, this.numParticles);
 		
+		
+		//solver - find non-active s1 from s0 and s0dot
+		this.solve = this.solvers["explicit_euler"]
+		this.solve(this.nonActiveParticleBuffer, this.activeParticleBuffer, this.activeDotBuffer,timestep)
+
+		//apply constraints
+		this.applyAllWalls(this.activeParticleBuffer)
+		
+		//swap
+		//this.swapBuffers()
+		
+		//draw other things
 		for(i in this.drawAbles)
 			this.drawAbles[i].draw()
 		
 	}
-	/*
-	this.dotMaker = function(CPart *pDotDest, CPart *pSrc
-	, CForcer *pF, CWall *pW)){
-		
-	}
-	this.applyAllForces = function(CPart *pS, CForcer *pF);
-	this.applyAllWalls = function(CPart *pS_now, CPart *pS_prev,  CWall *pWsrc);
-	this.stateVecSwap = function(CPart **ppA, CPart **ppB);
-	
-	void stateVecSizer(int nuSize);// For each state vector, create a new array
-	// (dyn. allocation) of particles.  Discard
-	// any previous particles (if any) and if
-	// successful, set partCount to 'nuSize'.
-	// (NOTE: same size for all state-vectors).
-	void stateVecWipe(void);        // Discard all existing memory allocated for
-	// state vectors in this CPartSys.
 
-	void stateVecDraw(CPart *pS);   // Draw state-vector pS usingOpenGL calls.
-
-	// Math operators (BETTER: use operator overloading!)
-	void stateVecZero(CPart *pS);                   // set state to zero
-	void stateVecAssign(CPart *pDest, CPart *pSrc); // copy src to dest
-	void stateVecAplusBtimesC(CPart *pDest, CPart *pA, CPart *pB, double scl);
-	// dest = A + scl*B
-
-	//-------Force-List Vector(s)----------------
-	int forcerCount;                // # of forcer-making objects held in the
-	// dyn. alloc'd list at pF0 (if needed, in
-	// pF1, pFM, pF0dot,pF1dot,pFMdot as well).
-	CForcer *pF0;                   // f0; forcer-vector-- dyn. alloc'd list of
-	// all CURRENT force-making objects,
-	// *pF0dot;                     //  and its time-derivative f0dot
-	// (==NULL if none).
-	/*
-	// OPTIONAL: as needed,
-	//      create these additional forcer-vectors to implement time-dependent-
-	//      and particle-dependent (?and wall-dependent?) force-making objects.
-	//  !!CAREFUL!!! Be sure to update forcerVecSizer(), forcerVecWipe(),
-	//               CPartSys() and ~CPartSys() for the new forcer-vectors;
-	//  NOTE: all forcer-vectors are the same size (CPartSys:: forcerCount).
-	CForcer *pF1, pF1dot;           // f1; forcer-vector--dyn. alloc'd list of
-									// all NEXT force-making objects, and its
-									// time-derivative f1dot (==NULL if none)
-	CForcer *pFM, *pFMdot;          // fM, fMdot; midpoint forcer-vector and its
-									// time deriv. (see solver, midpoint method)
-
-	void forcerVecSizer(int nuSize);// Change the size of each dyn.-alloc'd list
-	// of force-applying objects (CForcer obj.).
-	// Discard any previous forcers (if any),
-	// and if successful, set forcerCount to
-	// nuSize.(same size for all forcer-vectors)
-	void forcerVecWipe(void);       // Discard all existing memory allocated
-	// for forcer-vectors in this CPartSys.
-	void forcerVecDraw(CForcer *pF, CPart *pS);
-	// Draw forcer-vector pF using OpenGL calls;
-	// (needs corresponding state-vector at pS
-	// because force-applying springs get their
-	// positions in space from the particles
-	// they connect together).
-	//-------Wall-Vectors(s)---------------
-	int wallCount;                  //# of constraint-making objects (CWall obj)
-	// held in the dyn. alloc'd list at pC0.
-	CWall *pC0;                     // c0; constraint-vector--dyn. alloc'd list
-	// of all CURRENT constraint-making objects,
-	//CWall *pC0dot;                  // and its time-derivative c0dot
-	// (==NULL if none).
-	// OPTIONAL: as needed,
-	//      create these additional wall-vectors to implement time-dependent-0
-	//      and particle-dependent (?and forcer-dependent?) wall-making objects.
-	// !!CAREFUL!! Be sure to update wallVecSizer(), wallVecWipe(), CPartSys()
-	//      and ~CPartSys() for the new forcer-vectors.
-	// NOTE: same size for all wall-vectors)
-	void wallVecSizer(int nuSiz);   // For each limit-vector, create (by dyn.
-	// allocation) an new array of constraints
-	// (CLimit objects). Discard any prev.
-	// constraints (if any), and if successful,
-	// set limitCount to nuSiz.
-	// (NOTE: same size for all limit-vectors).
-	void wallVecWipe(void);         // Discard all existing memory allocated
-	// for wall-vectors in this CPartSys.
-	void wallVecDraw(CWall *pC);    // Draw the wall-vector pC with OpenGL calls
-	
-	*/
 
 }
 
