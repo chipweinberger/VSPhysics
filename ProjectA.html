@@ -131,7 +131,7 @@ var Renderer = function(){
 		
 	}
 	this.cam0 = new Camera()
-	this.circleCamera=false //circle the camera around center point
+	this.circleCamera=true //circle the camera around center point
 	this.uViewMatrixID
 	this.uProjMatrixID 
 	this.partSys
@@ -200,17 +200,19 @@ var Renderer = function(){
 		window.addEventListener("keydown", this.cam0.keyboardControl.bind(this.cam0), false);
 		
 		document.body.onmousedown = function() { 
-			  ++mouseDown;
+			  mouseDown = true;
 		}
 		
 		document.body.onmouseup = function() {
-			--mouseDown;
+			mouseDown = false;
 		}
 		
 		document.body.onmousemove = function(ev) {
 				var rect = ev.target.getBoundingClientRect();	    // get canvas corners in pixels
 				MouseX = ev.clientX - rect.left;					//x==0 at canvas left edge
 				MouseY = canvas.height - (ev.clientY - rect.top);	//y==0 at canvas bottom edge
+				
+				this.partSys.shootParticle(MouseX,MouseY)
 		}
 		
 		
@@ -218,15 +220,20 @@ var Renderer = function(){
 		this.partSys.addGravity()
 		this.partSys.addBoxIn(0,6,0,6)
 		this.partSys.addBoxOut(0,2,-3,1)
+		this.partSys.addBoidFlock(0,2,-2,30)
 		
 		window.requestAnimationFrame(this.draw.bind(this));
 		
 	}
+	var counter = 300
 	this.draw = function(){
 		gl.clear(gl.COLOR_BUFFER_BIT)
 		
+		
 		if(this.circleCamera){
-			this.cam0.eye = new Matrix4().setRotate(0.1, 0, 1, 0).multiplyVector3(this.cam0.eye)
+			counter++
+			this.cam0.eye = new Matrix4().rotate(0.17, 0, 1, 0).multiplyVector3(this.cam0.eye)
+			this.cam0.eye.elements[1] = -Math.sin(counter/70)*1.4 + 3 //up and down y
 		}
 			
 		
@@ -383,7 +390,7 @@ var Box = function(x,y,z,len){
 var ParticleSystem = function(glContext){
 	this.gl = glContext
 	
-	this.particleBufferSize = 100000 //starting size of buffer
+	this.particleBufferSize = 35 //starting size of buffer
 	this.numParticles = 0 //0 particles to start out
 	this.particleBuffers = {//all buffers start as null
 		ps0      : null,
@@ -437,7 +444,9 @@ var ParticleSystem = function(glContext){
 		PARTMASSVEL :17,  // time-rate-of-change of mass.
 		PARTMASSFTOT:18,  // force-accumulator for mass-change
 		
-		PARTICLESTRIDE:19,  // Size of array in CPart uses to store its values.
+		ISBOIDPARTICLE:19, //1 means it is a boid particle
+		
+		PARTICLESTRIDE:20,  // Size of array in CPart uses to store its values.
 	}
 	this.affected_particle_set = {
 		ALL:0,
@@ -491,6 +500,7 @@ var ParticleSystem = function(glContext){
 			// object, instead of many many F_SPRING objects.
 			FCHARGE    :9,       // attract/repel by charge and inverse distance;
 			// applies to all charged particles.
+			FBOID		:10, //only effects boid particles
 		},
 		TYPE:0,//one of the force_types from above
 		POSX:1,
@@ -557,6 +567,29 @@ var ParticleSystem = function(glContext){
 			
 	
 	}
+	var boidForceExists = false
+	var boidPartIndexStart
+	var boidPartIndexEnd
+	this.addBoidFlock = function(x,y,z,numBoids){
+		//add boid force
+		if(!boidForceExists)
+			boidPartIndexStart = this.addForce({
+				TYPE:"FBOID", 
+			})
+		
+		boidPartIndexStart = this.numParticles
+		boidPartIndexEnd = boidPartIndexStart + numBoids
+		//add boid particles
+		while(numBoids--){
+			this.addParticle({
+				"PARTXPOS":x + Math.random()*.9,
+				"PARTYPOS":y + Math.random()*.9,
+				"PARTZPOS":z + Math.random()*.9,
+				"PARTMASS":1,
+				"ISBOIDPARTICLE":1,
+				})
+			}
+		}
 	//example addForce({TYPE:F_GRAV_E, AFECTED_PARTICLES: ALL}
 	this.addWall = function( array_literal ){
 		this.numWalls += 1
@@ -599,11 +632,12 @@ var ParticleSystem = function(glContext){
 			var var_offset = this.particle_vars[key]
 			this.activeParticleBuffer[i + var_offset] =  array_literal[key]
 		}
+		return this.numParticles-1
 	}
 	this.addBoxIn= function(x,y,z,length){
 		this.addWall({
 			'TYPE':'WTYPEBOXIN',
-			'KBOUNCY':0.8,
+			'KBOUNCY':0.95,
 			'WALLXPOS':x,
 			'WALLYPOS':y,
 			'WALLZPOS':z,
@@ -655,11 +689,6 @@ var ParticleSystem = function(glContext){
 		})
 	
 	}
-	this.addFlock = function(x,y,z){
-	
-	}
-		if(mouseDown)
-			this.shootParticle(ev)
 	this.shootParticle = function(xp,yp){
   
 		// Convert to Canonical View Volume (CVV) coordinates too:
@@ -681,9 +710,9 @@ var ParticleSystem = function(glContext){
 			"PARTXPOS":rend.cam0.eye.x(),
 			"PARTYPOS":rend.cam0.eye.y(),
 			"PARTZPOS":rend.cam0.eye.z(),
-			"PARTXVEL": xdir*3,
-			"PARTYVEL": ydir*3,
-			"PARTZVEL": zdir*3,
+			"PARTXVEL": xdir,
+			"PARTYVEL": ydir,
+			"PARTZVEL": zdir,
 			"PARTMASS": 1,
 		})
 	}
@@ -699,6 +728,109 @@ var ParticleSystem = function(glContext){
 	this.setParticleVar = function(i, buffer, var_name, value){
 		buffer[ (i * this.particle_vars.PARTICLESTRIDE) + this.particle_vars[var_name] ] = value
 	}
+	//takes a vector3 - adds it to the force acc
+	this.applyVecForceToParticle = function(p, buffer, vec3){
+		//get current forces
+		var xftot = this.getParticleVar(p, buffer, "PARTXFTOT")
+		var yftot = this.getParticleVar(p, buffer, "PARTYFTOT")
+		var zftot = this.getParticleVar(p, buffer, "PARTZFTOT")
+		
+		//set forces
+		var e = vec3.elements
+		this.setParticleVar(p,buffer, "PARTXFTOT", xftot + e[0])
+		this.setParticleVar(p,buffer, "PARTYFTOT", yftot + e[1])
+		this.setParticleVar(p,buffer, "PARTZFTOT", zftot + e[2])
+	}
+	this.applyBoidSeperationForce = function(buffer, timestep){
+		for(var p = boidPartIndexStart; p < boidPartIndexEnd; p++){
+			var desiredSeperation = .2
+			var steer = new Vector3([0,0,0])
+			var myLocation = this.particlePosVector(p,buffer)
+			var myVelocity = this.particleVelVector(p,buffer)
+			for(var other = boidPartIndexStart; other < boidPartIndexEnd; other++) {
+				var otherLocation = this.particlePosVector(other, buffer)
+				var dist = myLocation.dist(otherLocation)
+				
+				if ((dist > 0) && (dist < desiredSeperation)) {
+					// Calculate vector pointing away from neighbor
+					var diff = new Vector3().sub(myLocation, otherLocation);
+					steer.add(diff);
+			  }
+			}
+			if(steer.length > .1)
+				steer.setLength(.1)
+			this.applyVecForceToParticle(p,buffer,steer.scale(1))
+		}
+	}
+	this.applyBoidAlignForce = function(buffer, timestep){
+	  for(var p = boidPartIndexStart; p < boidPartIndexEnd; p++){
+			var neighbordist = 1.5;
+			var myLocation = this.particlePosVector(p,buffer)
+			var myVelocity = this.particleVelVector(p,buffer)
+			
+			var sum = new Vector3(0, 0, 0);
+			var count = 0;
+			
+			for(var other = boidPartIndexStart; other < boidPartIndexEnd; other++) {
+			
+				var otherLocation = this.particlePosVector(other,buffer)
+				var otherVelocity = this.particleVelVector(other,buffer)
+				var dist = myLocation.dist(otherLocation)
+				  if ((dist > 0) && (dist < neighbordist)) {
+					sum.add(otherVelocity);
+					count++;
+				  }
+			}
+			if (count > 0) {
+			  sum.scale( 1 / count);
+			  var steer = new Vector3().sub(sum, myVelocity)
+			  if(steer.length > .3)
+				steer.setLength(.3)
+			  this.applyVecForceToParticle(p,buffer,steer.scale(3))
+			}
+		}
+	}
+	var lastBoidDir = new Vector3(Math.random(),Math.random(),Math.random())
+	var boidCounter = 0
+	this.applyBoidTarget = function(buffer, timestep){
+	  if(boidCounter = 30){
+			counter = 0
+			lastBoidDir = new Vector3(Math.random(),Math.random(),Math.random())
+	  }
+	  for(var p = boidPartIndexStart; p < boidPartIndexEnd; p++){
+			this.applyVecForceToParticle(p,buffer,lastBoidDir.scale(3))	
+		}
+	}
+	//steer towards average location of neighborhood
+	this.applyBoidCohesionForce = function(buffer, timestep){
+		for(var p = boidPartIndexStart; p < boidPartIndexEnd; p++){
+			var neighbordist = .3;
+			var myLocation = this.particlePosVector(p,buffer)
+			var myVelocity = this.particleVelVector(p,buffer)
+			
+			var sum = new Vector3(0, 0, 0);
+			var count = 0;
+			
+			for(var other = boidPartIndexStart; other < boidPartIndexEnd; other++) {
+				var otherLocation = this.particlePosVector(other,buffer)
+				var otherVelocity = this.particleVelVector(other,buffer)
+				var dist = myLocation.dist(otherLocation)
+
+			    if ((dist > 0) && (dist < neighbordist)) {
+					sum.add(otherLocation); // Add location
+					count++;
+			    }
+			}
+			if (count > 0) {
+				sum.scale(1/count);//average location
+				var steer = new Vector3().sub(sum, myLocation)
+				if(steer.length > .1)
+					steer.setLength(.1)
+				this.applyVecForceToParticle(p,buffer,steer.scale(.8))
+			 }
+		}
+	
+	}
 	this.applyAllForces = function(buffer, timestep){
 		//first clear all particles FTOT to ZERO
 		for(var p = 0; p < this.numParticles; p++){
@@ -711,10 +843,18 @@ var ParticleSystem = function(glContext){
 		
 			var force_type = this.getForceVar(i,"TYPE")
 			switch(force_type){
+				case 10://FBOID
+					this.applyBoidSeperationForce(buffer,timestep)
+					this.applyBoidAlignForce(buffer,timestep)
+					this.applyBoidCohesionForce(buffer,timestep)
+					break
 				case 2://FGRAVE
 					for(var p = 0; p < this.numParticles; p++){
-						var ytot = this.getParticleVar(p, buffer, "PARTYFTOT")
-						this.setParticleVar(p, buffer, "PARTYFTOT", ytot - (0.06 * timestep))
+						//BOIDS particles not affected by gravity in my model
+						if(this.getParticleVar(p,buffer, "ISBOIDPARTICLE")!=1){
+							var ytot = this.getParticleVar(p, buffer, "PARTYFTOT")
+							this.setParticleVar(p, buffer, "PARTYFTOT", ytot - (0.06 * timestep))
+						}
 					}
 					break
 				case 9://charge
@@ -928,6 +1068,18 @@ var ParticleSystem = function(glContext){
 		this.nonActiveDotBuffer = tempdot
 		this.nonActiveParticleBufferID = tempID
 	
+	}
+	this.particlePosVector = function(i,buffer){
+		var x =  this.getParticleVar(i,buffer,"PARTXPOS")
+		var y =  this.getParticleVar(i,buffer,"PARTYPOS")
+		var z =  this.getParticleVar(i,buffer,"PARTZPOS")
+		return new Vector3([x,y,z])
+	}
+	this.particleVelVector = function(i,buffer){
+		var xvel =  this.getParticleVar(i,buffer,"PARTXVEL")
+		var yvel =  this.getParticleVar(i,buffer,"PARTYVEL")
+		var zvel =  this.getParticleVar(i,buffer,"PARTZVEL")
+		return new Vector3([xvel,yvel,zvel])
 	}
 	this.draw = function(timestep){
 		var timestep = 1/3 //constant timestep for now
