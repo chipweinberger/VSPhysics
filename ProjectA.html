@@ -2,7 +2,11 @@
 <button type="button" onclick="rend.partSys.addCharge(0,0,-2,5)">Add charge in middle</button>
 <button type="button" onclick="rend.circleCamera = true">Circle Camera ON</button>
 <button type="button" onclick="rend.circleCamera = false">Circle Camera OFF</button>
+<button type="button" onclick="rend.partSys.fireOn = true">fire on</button>
+<button type="button" onclick="rend.partSys.fireOn = false">fire off</button>
 Camera Key Controls: (position) a,z,s,x,d,c (aim) arrow keys + f,v,
+<br> click the mouse to shoot a particle
+<br> note because I have not implemented garbage collection fire will destroy frame rate after awhile
 <canvas id="glcanvas" width="1024" height="768">
 </canvas>
 
@@ -16,7 +20,7 @@ Camera Key Controls: (position) a,z,s,x,d,c (aim) arrow keys + f,v,
 
 
 <script id="fragmentShader" type="x-shader/x-fragment">
-precision mediump float;
+precision highp float;
 
 varying vec4 vColor;
 
@@ -26,19 +30,34 @@ void main(void) {
 </script>
 
 <script id="vertexShader" type="x-shader/x-vertex">
+precision highp float;
+
+attribute float a_Age;
+attribute float disappear_age;
 attribute vec3 a_Position;
+attribute vec3 a_Color;
 
 uniform mat4 uViewMatrix;
 uniform mat4 uProjMatrix;
 uniform mat4 uModelMatrix;
-uniform vec4 aColor;
+
+uniform float useConstColor;
+uniform vec4 constColor;
 
 varying vec4 vColor;
 
 void main(void) {
 	gl_Position = uProjMatrix * uViewMatrix * uModelMatrix * vec4(a_Position, 1.0);
 	gl_PointSize = 10.0;
-	vColor = aColor;
+	
+	if(a_Age < disappear_age || disappear_age == 0.0){
+		if(useConstColor == 1.0)
+			vColor = constColor;
+		else
+			vColor = vec4(a_Color, 1);
+	}else{
+		vColor = vec4(0,0,0,0);
+	}
 }
 </script>
 
@@ -49,6 +68,11 @@ void main(void) {
 var gl //context
 var a_PositionID 
 var a_ColorID 
+var constColorID
+var useConstColorID
+var a_AgeID 
+var disappear_ageID
+
 var canvas //canvas element
 var uModelMatrixID
 var mouseDown = 0;
@@ -146,7 +170,9 @@ var Renderer = function(){
 
 		gl.viewport(0,0,canvas.width,canvas.height)
 		gl.clearColor(0.0, 0.0, 0.0, 1.0)                     
-		gl.enable(gl.DEPTH_TEST)                              
+		//gl.enable(gl.DEPTH_TEST) 
+		gl.enable(gl.BLEND);
+		gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 		gl.depthFunc(gl.LEQUAL)  
 
 		//compile shaders
@@ -172,6 +198,21 @@ var Renderer = function(){
 		if(a_PositionID < 0) console.log('Failed to get the gfx storage location of a_Position')
 		gl.enableVertexAttribArray(a_PositionID);
 		
+		//color attribute
+		a_ColorID = gl.getAttribLocation(shaderProgram, 'a_Color')
+		if(a_ColorID < 0) console.log('Failed to get the gfx storage location of a_Color')
+		
+		//age attribute
+		a_AgeID = gl.getAttribLocation(shaderProgram, 'a_Age')
+		if(a_AgeID < 0) console.log('Failed to get the gfx storage location of a_Age')
+		
+		disappear_ageID = gl.getAttribLocation(shaderProgram, 'disappear_age')
+		
+		
+		useConstColorID = gl.getUniformLocation(shaderProgram, 'useConstColor')
+		constColorID = gl.getUniformLocation(shaderProgram, 'constColor')
+		
+		
 		
 		//projection matrix location
 		uProjMatrixID = gl.getUniformLocation(shaderProgram, 'uProjMatrix')
@@ -185,8 +226,6 @@ var Renderer = function(){
 		uModelMatrixID = gl.getUniformLocation(shaderProgram, 'uModelMatrix')
 		if(uModelMatrixID < 0) console.log('Failed to get the gfx storage location of uModelMatrix')
 		
-		//model matrix location
-		a_ColorID = gl.getUniformLocation(shaderProgram, 'aColor')
 		
 		//groundplane
 		this.ground_plane = new GroundPlane(gl,"Y", 60, .2)
@@ -219,8 +258,10 @@ var Renderer = function(){
 		//add gravity
 		this.partSys.addGravity()
 		this.partSys.addBoxIn(0,6,0,6)
-		this.partSys.addBoxOut(0,2,-3,1)
-		this.partSys.addBoidFlock(0,2,-2,30)
+		this.partSys.addSphere(-3,3,0,1.2)
+		this.partSys.addBoxOut(0,2,-3,.8)
+		this.partSys.addBoidFlock(0,2,3,30)
+		this.partSys.addCloth(1,2,-1)
 		
 		window.requestAnimationFrame(this.draw.bind(this));
 		
@@ -244,7 +285,6 @@ var Renderer = function(){
 		//model matrix is used by the models - set to identity for now
 		gl.uniformMatrix4fv(uModelMatrixID, false, new Matrix4().elements)
 		
-		gl.uniform4fv(a_ColorID, new Float32Array([1,1,1,1]))
 		
 		this.ground_plane.draw()
 		this.partSys.draw()
@@ -303,9 +343,10 @@ var GroundPlane = function(glContext, axis, num_lines, spacing){
 		//attributeID, size of vector, type, normalized?, stride, offset
 		gl.vertexAttribPointer(a_PositionID,3,gl.FLOAT, false, 0,0)
 		
-		gl.uniform4fv(a_ColorID, new Float32Array([1,0,1,1]))
+		gl.uniform1f(useConstColorID, 1.0)
+		gl.uniform4fv(constColorID, new Float32Array([1,0,1,1]))
 		gl.drawArrays(gl.LINES, 0, num_lines * 4);
-		gl.uniform4fv(a_ColorID, new Float32Array([1,1,1,1]))
+		gl.uniform1f(useConstColorID, 0.0)
 	}
 }
 
@@ -377,9 +418,11 @@ var Box = function(x,y,z,len){
 			var model = new Matrix4().setTranslate(this.x, this.y, this.z).multiply( scale ) 
 			gl.uniformMatrix4fv(uModelMatrixID, false, model.elements)
 			
-			gl.uniform4fv(a_ColorID, new Float32Array([0,0.8,0.2,1]))
+			gl.uniform1f(useConstColorID, 1.0)
+			gl.uniform4fv(constColorID, new Float32Array([0,0.8,0.2,1]))
 			gl.drawElements(gl.TRIANGLES, 24, gl.UNSIGNED_SHORT, 0);
-			gl.uniform4fv(a_ColorID, new Float32Array([1,1,1,1]))
+			
+			gl.uniform1f(useConstColorID, 0.0)
 			
 			//set back to identity
 			gl.uniformMatrix4fv(uModelMatrixID, false, new Matrix4().elements)
@@ -390,7 +433,7 @@ var Box = function(x,y,z,len){
 var ParticleSystem = function(glContext){
 	this.gl = glContext
 	
-	this.particleBufferSize = 35 //starting size of buffer
+	this.particleBufferSize = 100000 //starting size of buffer
 	this.numParticles = 0 //0 particles to start out
 	this.particleBuffers = {//all buffers start as null
 		ps0      : null,
@@ -411,7 +454,7 @@ var ParticleSystem = function(glContext){
 	this.nonActiveDotBuffer
 	this.nonActiveParticleBufferID
 	
-	this.forceBufferSize = 100 //starting size of buffer
+	this.forceBufferSize = 1000 //starting size of buffer
 	this.numForces = 0 //0 forces to start out
 	this.forceBuffer 
 	
@@ -444,9 +487,15 @@ var ParticleSystem = function(glContext){
 		PARTMASSVEL :17,  // time-rate-of-change of mass.
 		PARTMASSFTOT:18,  // force-accumulator for mass-change
 		
-		ISBOIDPARTICLE:19, //1 means it is a boid particle
+		PARTRVEL       :19,  // color : red,green,blue
+		PARTGVEL       :20,  
+		PARTBVEL       :21,
 		
-		PARTICLESTRIDE:20,  // Size of array in CPart uses to store its values.
+		PARTDISAPPEARAGE:22, //the age the particle disappears
+		
+		ISBOIDPARTICLE:23, //1 means it is a boid particle
+		
+		PARTICLESTRIDE:24,  // Size of array in CPart uses to store its values.
 	}
 	this.affected_particle_set = {
 		ALL:0,
@@ -477,8 +526,8 @@ var ParticleSystem = function(glContext){
 		WALLZPOS:4,
 		RADIUS:5,
 		AFFECTEDPARTICLES:6,//instance of "affected particle set"
-		PARTINDEX1:7,		 //index of particle affected by constraint
-		PARTINDEX2:8,
+		WPARTINDEX1:7,		 //index of particle affected by constraint
+		WPARTINDEX2:8,
 		
 		WALLSTRIDE:9, //stride of a wall object
 	}
@@ -515,7 +564,9 @@ var ParticleSystem = function(glContext){
 		PARTINDEX1:10,
 		PARTINDEX2:11,
 		
-		FORCESTRIDE:12,
+		FRADIUS:12, //used to find the radius of the wind which is a cylinder
+		
+		FORCESTRIDE:13,
 	}
 	this.initBuffers = function(){
 		this.forceBuffer = new Float32Array(this.forceBufferSize * this.force_vars.FORCESTRIDE)
@@ -543,7 +594,7 @@ var ParticleSystem = function(glContext){
 	this.addForce = function( array_literal ){
 		this.numForces += 1
 		if(this.numForces > this.forceBufferSize){
-			alert("cannot add more particles. need to implement buffer resizing")
+			alert("cannot add more forces. need to implement buffer resizing")
 			return
 		}
 		
@@ -582,10 +633,13 @@ var ParticleSystem = function(glContext){
 		//add boid particles
 		while(numBoids--){
 			this.addParticle({
-				"PARTXPOS":x + Math.random()*.9,
-				"PARTYPOS":y + Math.random()*.9,
-				"PARTZPOS":z + Math.random()*.9,
+				"PARTXPOS":x + (Math.random()*.9),
+				"PARTYPOS":y + (Math.random()*.9),
+				"PARTZPOS":z + (Math.random()*.9),
 				"PARTMASS":1,
+				"PARTR":1,
+				"PARTG":1,
+				"PARTB":1,
 				"ISBOIDPARTICLE":1,
 				})
 			}
@@ -659,7 +713,10 @@ var ParticleSystem = function(glContext){
 			AFFECTEDPARTICLES:"ALL"
 		})
 	}
-	this.addSphere = function(x,y,x,radius){
+	this.addSphere = function(x,y,z,radius){
+	
+		this.drawAbles.push(new Box(x,y,z,radius))
+	
 		this.addWall({
 			TYPE:"WTYPESPHERE",
 			KBOUNCY:0.5,
@@ -713,6 +770,10 @@ var ParticleSystem = function(glContext){
 			"PARTXVEL": xdir,
 			"PARTYVEL": ydir,
 			"PARTZVEL": zdir,
+			"PARTR":Math.random(),
+			"PARTG":Math.random(),
+			"PARTB":Math.random(),
+			"PARTDISAPPEARAGE":900,
 			"PARTMASS": 1,
 		})
 	}
@@ -857,6 +918,24 @@ var ParticleSystem = function(glContext){
 						}
 					}
 					break
+				case 7://spring
+					var partInd1 = this.getForceVar(i,"PARTINDEX1")
+					var partInd2 = this.getForceVar(i,"PARTINDEX2")
+					var stren = this.getForceVar(i,"STRENGTH")
+					
+					var pos1 = this.particlePosVector(partInd1,buffer)
+					var pos2 = this.particlePosVector(partInd2,buffer)
+					
+					var dist = pos1.dist(pos2)
+					var force= dist * stren
+					
+					var dir1 = new Vector3().sub(pos2, pos1)
+					var dir2 = new Vector3().sub(pos1, pos2)
+					
+					this.applyVecForceToParticle(partInd1,buffer, dir1.scale(1/30))
+					this.applyVecForceToParticle(partInd2,buffer, dir2.scale(1/30))
+					
+					break
 				case 9://charge
 					for(var p = 0; p < this.numParticles; p++){
 						//charge pos
@@ -886,6 +965,21 @@ var ParticleSystem = function(glContext){
 						this.setParticleVar(p,buffer, "PARTXFTOT", xftot + xForce)
 						this.setParticleVar(p,buffer, "PARTYFTOT", yftot + yForce)
 						this.setParticleVar(p,buffer, "PARTZFTOT", zftot + zForce)
+					}
+					break
+				case 4://fwind
+					for(var p = 0; p < this.numParticles; p++){
+						var fpos = this.forcePosVector(i)
+						var fdir = this.forceDirVector(i)
+						var radius =  this.getForceVar(i,"FRADIUS")
+						var strength = this.getForceVar(i,"STRENGTH")
+						
+						var ppos = this.particlePosVector(p,buffer)
+						var page = this.getParticleVar(p, buffer, "PARTAGE")//age is a simpler stand in for constant mass decay
+						
+						if(ppos.dist(fpos) < radius){
+							this.applyVecForceToParticle(p,buffer,fdir.scale(strength).scale((page*1.5)/180))
+						}
 					}
 					break
 			}
@@ -971,21 +1065,41 @@ var ParticleSystem = function(glContext){
 							
 							zpos > (boxZ - rad)){
 							insideBox = true
-							
-							 this.setParticleVar(p,buffer,"PARTZPOS", boxZ + rad )
-							 this.setParticleVar(p,buffer,"PARTZVEL", zvel * -1* kbounce)
+							//did not implement correct reflections off boxes
+							 this.setParticleVar(p,buffer,"PARTXVEL", xvel * -1.1)
+							 this.setParticleVar(p,buffer,"PARTYVEL", yvel * -1.1)
+							 this.setParticleVar(p,buffer,"PARTZVEL", zvel * -1.1)
 							}
 						
-						//reverse x
-
-
-						
 					}
+					break
 				case 3://SPHERE
 					for(var p = 0; p < this.numParticles; p++){
-						var yvel = this.getParticleVar(p, "PARTYVEL")
-						this.setParticleVar(p,"PARTYVEL", yvel - 0.0025)
+						var ppos = this.particlePosVector(p,buffer)
+						var wpos = this.wallPosVector(i,buffer)
+						
+						var xvel = this.getParticleVar(p, buffer, "PARTXVEL")
+						var yvel = this.getParticleVar(p, buffer, "PARTYVEL")
+						var zvel = this.getParticleVar(p, buffer, "PARTZVEL")
+						
+						if(ppos.dist(wpos) < this.getWallVar(i, "RADIUS")){
+							 
+							 this.setParticleVar(p,buffer,"PARTXVEL", xvel * -1.1)
+							 this.setParticleVar(p,buffer,"PARTYVEL", yvel * -1.1)
+							 this.setParticleVar(p,buffer,"PARTZVEL", zvel * -1.1)
+							 
+						}
 					}
+					break
+				case 6://anchor
+					var p = this.getWallVar(i,"WPARTINDEX1")
+					var x = this.getWallVar(i,"WALLXPOS")
+					var y = this.getWallVar(i,"WALLYPOS")
+					var z = this.getWallVar(i,"WALLZPOS")
+				
+					this.setParticleVar(p,buffer,"PARTXPOS", x)
+					this.setParticleVar(p,buffer,"PARTYPOS", y)
+					this.setParticleVar(p,buffer,"PARTZPOS", z)
 			}
 		
 		}
@@ -1013,6 +1127,19 @@ var ParticleSystem = function(glContext){
 			this.setParticleVar(i,dot_buffer,"PARTXVEL", accx)
 			this.setParticleVar(i,dot_buffer,"PARTYVEL", accy)
 			this.setParticleVar(i,dot_buffer,"PARTZVEL", accz)
+			
+			
+			//do color shifts
+			var rvel = this.getParticleVar(i,part_buffer,"PARTRVEL")
+			var gvel = this.getParticleVar(i,part_buffer,"PARTGVEL")
+			var bvel = this.getParticleVar(i,part_buffer,"PARTBVEL")
+			
+			this.setParticleVar(i,dot_buffer,"PARTR", rvel)
+			this.setParticleVar(i,dot_buffer,"PARTG", gvel)
+			this.setParticleVar(i,dot_buffer,"PARTB", bvel)
+			
+			//age
+			this.setParticleVar(i,dot_buffer,"PARTAGE", 1)
 	
 		}
 	
@@ -1031,6 +1158,12 @@ var ParticleSystem = function(glContext){
 						var partyvel = this.getParticleVar(i,part_buffer, "PARTYVEL")
 						var partzvel = this.getParticleVar(i,part_buffer, "PARTZVEL")
 						
+						var partr = this.getParticleVar(i,part_buffer, "PARTR")
+						var partg = this.getParticleVar(i,part_buffer, "PARTG")
+						var partb = this.getParticleVar(i,part_buffer, "PARTB")
+						
+						var partage = this.getParticleVar(i,part_buffer, "PARTAGE")
+						
 						//dot
 						var dotx = this.getParticleVar(i,dot_buffer, "PARTXPOS")
 						var doty = this.getParticleVar(i,dot_buffer, "PARTYPOS")
@@ -1040,6 +1173,11 @@ var ParticleSystem = function(glContext){
 						var dotyvel = this.getParticleVar(i,dot_buffer, "PARTYVEL")
 						var dotzvel = this.getParticleVar(i,dot_buffer, "PARTZVEL")
 						
+						var dotr = this.getParticleVar(i,dot_buffer, "PARTR")
+						var dotg = this.getParticleVar(i,dot_buffer, "PARTG")
+						var dotb = this.getParticleVar(i,dot_buffer, "PARTB")
+						
+						
 						//add
 						this.setParticleVar(i,part_buffer,"PARTXPOS", partx + (dotx * timestep))
 						this.setParticleVar(i,part_buffer,"PARTYPOS", party + (doty * timestep))
@@ -1048,6 +1186,12 @@ var ParticleSystem = function(glContext){
 						this.setParticleVar(i,part_buffer,"PARTXVEL", partxvel + (dotxvel * timestep))
 						this.setParticleVar(i,part_buffer,"PARTYVEL", partyvel + (dotyvel * timestep))
 						this.setParticleVar(i,part_buffer,"PARTZVEL", partzvel + (dotzvel * timestep))
+						
+						this.setParticleVar(i,part_buffer,"PARTR", partr + (dotr * timestep))
+						this.setParticleVar(i,part_buffer,"PARTG", partg + (dotg * timestep))
+						this.setParticleVar(i,part_buffer,"PARTB", partb + (dotb * timestep))
+						
+						this.setParticleVar(i,part_buffer,"PARTAGE", partage + 1)
 						
 					}
 			},
@@ -1075,17 +1219,168 @@ var ParticleSystem = function(glContext){
 		var z =  this.getParticleVar(i,buffer,"PARTZPOS")
 		return new Vector3([x,y,z])
 	}
+	this.wallPosVector = function(i,buffer){
+		var x =  this.getWallVar(i,buffer,"WALLXPOS")
+		var y =  this.getWallVar(i,buffer,"WALLYPOS")
+		var z =  this.getWallVar(i,buffer,"WALLZPOS")
+		return new Vector3([x,y,z])
+	}
 	this.particleVelVector = function(i,buffer){
 		var xvel =  this.getParticleVar(i,buffer,"PARTXVEL")
 		var yvel =  this.getParticleVar(i,buffer,"PARTYVEL")
 		var zvel =  this.getParticleVar(i,buffer,"PARTZVEL")
 		return new Vector3([xvel,yvel,zvel])
 	}
+	this.forcePosVector = function(i){
+		var x =  this.getForceVar(i,"POSX")
+		var y =  this.getForceVar(i,"POSY")
+		var z =  this.getForceVar(i,"POSX")
+		return new Vector3([x,y,z])
+	}
+	this.forceDirVector = function(i){
+		var dirx =  this.getForceVar(i,"DIRX")
+		var diry =  this.getForceVar(i,"DIRY")
+		var dirz =  this.getForceVar(i,"DIRZ")
+		return new Vector3([dirx,diry,dirz])
+	}
+	this.addWind = function(x,y,z,dirx,diry,dirz,radius){
+		this.addForce({
+				TYPE:"FWIND",
+				POSX:x,
+				POSY:y,
+				POSZ:z,
+				DIRX:dirx,
+				DIRY:diry,
+				DIRZ:dirz,
+				FRADIUS:radius,
+				STRENGTH:0.5,
+			}
+		)
+	
+	
+	}
+	var fireWindAdded = false
+	this.fireOn = false
+	this.animateFire = function(){
+	
+		var pos = new Vector3([0,0,0])
+		var e = pos.elements
+		if(! fireWindAdded){
+			fireWindAdded = true
+			this.addWind(e[0] ,e[1] ,e[2], 0,1,0, 1.1)
+		}
+	
+		var particlesPerFrame = 30
+		
+		while(particlesPerFrame--){
+		
+			//multiplying Math.random * Math.random makes bigger nummbers less likely
+			var rand = function(){
+				return Math.random() - 0.5
+			}
+			
+			var shiftAmount = new Vector3([rand() * rand(), 0 , rand() * rand()]).scale(1.5)
+			var shiftedPos = pos.add(shiftAmount)
+			
+			var trajectory = new Vector3([rand(), 1.2, rand()]).scale(0.12)
+			
+			var p = shiftedPos.elements
+			var t = trajectory.elements
+			this.addParticle({
+			
+				"PARTXPOS":p[0],
+				"PARTYPOS":p[1],
+				"PARTZPOS":p[2],
+				"PARTXVEL":t[0],
+				"PARTYVEL":t[1],
+				"PARTZVEL":t[2],
+				"PARTR":1,
+				"PARTG":1,
+				"PARTB":1,
+				"PARTRVEL":0,
+				"PARTGVEL":-.07,
+				"PARTBVEL":-.13,
+				"PARTAGE":0,
+				"PARTMASS": 1,
+				"PARTDISAPPEARAGE":50,
+			
+			})
+		}
+	
+	
+	}
+	this.addCloth = function(x,y,z){
+		var seperation = 0.2
+		var clothLenX = 10
+		var clothLenY = 10
+		var clothIndexStart = this.numParticles
+		//add particles
+		for(var row = 0; row < clothLenY; row++){
+			for(var col = 0; col < clothLenY; col++){
+				var p = this.addParticle({
+					"PARTXPOS":x + (row * seperation),
+					"PARTYPOS":y + (col * seperation),
+					"PARTZPOS":z,
+					"PARTR":.3,
+					"PARTG":0,
+					"PARTB":1,
+					"PARTAGE":0,
+					"PARTMASS": 1,
+				})
+			}
+		}
+		
+		//add springs
+		//link in X direction first, stop one before the end
+		for(var row = 0; row < clothLenY -1; row++){
+			for(var i = 0; i < clothLenX -1; i++){
+				this.addForce({
+					"TYPE":"FSPRING",
+					"AFFECTEDPARTICLES":this.affected_particle_set.BOTH12,
+					"PARTINDEX1": clothIndexStart + i + (row * clothLenX),
+					"PARTINDEX2": clothIndexStart + i + 1 + (row * clothLenX),
+					"STRENGTH":1,
+				})
+			}
+		}
+		//link in Y direction second
+		for(var row = 0; row < clothLenX -1; row++){
+			for(var i = 0; i < clothLenY -1; i++){
+				this.addForce({
+					"TYPE":"FSPRING",
+					"AFFECTEDPARTICLES":this.affected_particle_set.BOTH12,
+					"PARTINDEX1": clothIndexStart + i + (row * clothLenX),
+					"PARTINDEX2": clothIndexStart + i + clothLenX + (row * clothLenX),
+					"STRENGTH":1,
+				})
+			}
+		}
+		//anchors
+		this.addWall({
+				"TYPE":"WTYPEANCHOR",
+				"WPARTINDEX1": clothIndexStart,
+				"WALLXPOS":x,
+				"WALLYPOS":y,
+				"WALLZPOS":z,
+		})
+		this.addWall({
+			"TYPE":"WTYPEANCHOR",
+			"WPARTINDEX1": clothIndexStart + clothLenX,
+			"WALLXPOS":x + (9 * seperation),
+			"WALLYPOS":y,
+			"WALLZPOS":z,
+		})
+		
+	
+	}
 	this.draw = function(timestep){
 		var timestep = 1/3 //constant timestep for now
 		
 		if(mouseDown)
 			this.shootParticle(MouseX,MouseY)
+			
+		if(this.fireOn)
+		this.animateFire()
 	
 		//apply all force
 		this.applyAllForces(this.activeParticleBuffer, timestep)
@@ -1100,7 +1395,14 @@ var ParticleSystem = function(glContext){
 		//attributeID, size of vector, type, normalized?, stride, offset
 		var stride = this.particle_vars.PARTICLESTRIDE * this.activeParticleBuffer.BYTES_PER_ELEMENT
 		gl.vertexAttribPointer(a_PositionID,3,gl.FLOAT, false, stride,0)
+		gl.vertexAttribPointer(a_ColorID,3,gl.FLOAT, false, stride,this.particle_vars.PARTR * 4)
+		gl.enableVertexAttribArray(a_ColorID);
+		gl.vertexAttribPointer(a_AgeID,3,gl.FLOAT, false, stride,this.particle_vars.PARTAGE * 4)
+		gl.enableVertexAttribArray(a_AgeID);
+		gl.vertexAttribPointer(disappear_ageID,3,gl.FLOAT, false, stride,this.particle_vars.PARTDISAPPEARAGE * 4)
+		gl.enableVertexAttribArray(disappear_ageID);
 		gl.drawArrays(gl.POINTS, 0, this.numParticles);
+		gl.disableVertexAttribArray(disappear_ageID);
 		
 		
 		//solver - find non-active s1 from s0 and s0dot
